@@ -1,0 +1,16 @@
+# Pinned, hash-checked `uv` CLI bootstrap for GitHub Actions
+# (STANDARDS.md CP-008/DOC-008, design #223 P3-ADR-8: no `astral-sh/setup-uv`
+# action is approved, so `uv` is installed with the stdlib-approved `pip`
+# instead, verified against these hashes).
+#
+# Installed with:
+#   python -m pip install --require-hashes --only-binary=:all: --no-deps \
+#     -r .github/uv-requirements.txt
+#
+# To refresh: bump the version below and copy the sha256 digests for the
+# linux x86_64 wheels (manylinux and musllinux) from
+# https://pypi.org/pypi/uv/json ("urls" for that release). `uv` itself
+# declares no dependencies, so no transitive hashes are needed here.
+uv==0.12.13 \
+    --hash=sha256:5312891392eb5b72eaca9b880e85fe3e706a2b11342e59f7a5cf0304d14d5cc5 \
+    --hash=sha256:15f368be55e87109391a31c50846e81086b9792ccb43a1731774e961ea0641b7

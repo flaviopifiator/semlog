@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://semlog.invalid/schemas/event-catalog.schema.json",
+  "title": "SEMLOG event catalog",
+  "description": "JSON document shape accepted by configure(catalog=...). See STANDARDS.md section 5 for the normative prose. This document intentionally uses only a small keyword subset (type, enum, pattern, required, properties, propertyNames, additionalProperties) so it can be checked by a stdlib-only in-test validator.",
+  "type": "object",
+  "required": ["events"],
+  "additionalProperties": false,
+  "properties": {
+    "events": {
+      "type": "object",
+      "description": "Map of declared event names to their description and declared attributes.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["description", "attributes"],
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "attributes": {
+            "type": "object",
+            "description": "Map of declared attribute keys (dotted, flat) to their declared type and optional enum.",
+            "propertyNames": {
+              "pattern": "^[a-z][a-z0-9_]*(\\.[a-z0-9_]+)*$"
+            },
+            "additionalProperties": {
+              "type": "object",
+              "required": ["type"],
+              "additionalProperties": false,
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "enum": ["string", "integer", "number", "boolean", "array", "object"]
+                },
+                "enum": {
+                  "type": "array"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

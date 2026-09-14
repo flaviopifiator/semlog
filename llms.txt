@@ -1,0 +1,27 @@
+# semlog
+
+> A structured logging library for Python, built entirely on the standard library's `logging` module, aligned with the OpenTelemetry Logs Data Model and W3C Trace Context, with zero runtime dependencies.
+
+Run `python -m semlog llm` (or call `semlog.llm()` from the installed package) for the agent guide matching your installed version.
+
+## Docs
+
+- [README](README.md): what semlog is for, installation, quick start, public API, FastAPI/Django recipes, configuration, output example, and compatibility matrix.
+- [STANDARDS](STANDARDS.md): the normative record contract, severity mapping, extension limits, pipeline guarantees, compatibility policy, and references.
+
+## Agent guide
+
+- [Agent guide](src/semlog/agent_guide.md): the single, self-sufficient English guide for coding agents writing call sites against semlog: public API with signatures, call-site rules, level semantics, the output contract, configuration, FastAPI/Django recipes, and migration/review checklists. Also returned by `semlog.llm()` and `python -m semlog llm`.
+
+## Schemas
+
+- [Log record schema](schemas/log-record.schema.json): JSON Schema 2020-12 for every emitted log record.
+- [Event catalog schema](schemas/event-catalog.schema.json): JSON Schema 2020-12 for the `configure(catalog=...)` document.
+
+## Optional
+
+- [AGENTS.md](AGENTS.md): setup, test, lint, and build commands, tooling policy, and branch protection for coding agents contributing to semlog itself.
+- [BENCHMARKS.md](BENCHMARKS.md): benchmark methodology, scenarios, and how to run the harness; results are not published yet.
+- [README.es.md](README.es.md): the Spanish translation of the README.
+- [SECURITY.md](SECURITY.md): how to report a vulnerability and how to verify a release's PEP 740 attestations.
+- [RELEASING.md](RELEASING.md): how versions are decided, what the pull request check enforces, and how a merge to `main` is tagged and published after approval.

@@ -1,0 +1,96 @@
+"""Packaging hygiene: SemVer, Keep a Changelog, Conventional Commits, and
+the SPDX license declaration (STANDARDS.md CP-004, section 11; spec #176
+CP-004).
+
+Proves: CP-004 -- the published version is valid SemVer 2.0.0; a
+CHANGELOG.md exists at the repository root, names both Keep a Changelog
+and Semantic Versioning, and every version-like heading is either
+`[Unreleased]` or a dated `[X.Y.Z] - YYYY-MM-DD` entry; the license is
+declared as the SPDX `Apache-2.0` expression; and AGENTS.md documents the
+Conventional Commits convention for commit messages.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+import unittest
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# https://semver.org/spec/v2.0.0.html -- the spec's own suggested regex.
+_SEMVER_RE = re.compile(
+    r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+    r"(?:-(?:(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?"
+    r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$"
+)
+_HEADING_RE = re.compile(
+    r"^## \[Unreleased\]$|^## \[\d+\.\d+\.\d+[^\]]*\] - \d{4}-\d{2}-\d{2}$"
+)
+
+
+def _load_pyproject_project_table():
+    """Return `[project]`'s `version` and `license`, matching
+    `tests/test_packaging.py`'s tomllib-with-regex-fallback pattern (no
+    stdlib TOML reader on Python 3.10, SI-001)."""
+    text = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        data = tomllib.loads(text)
+        return data["project"]["version"], data["project"]["license"]
+    version_match = re.search(r'^version = "([^"]+)"', text, re.MULTILINE)
+    license_match = re.search(r'^license = "([^"]+)"', text, re.MULTILINE)
+    return version_match.group(1), license_match.group(1)
+
+
+class SemVerAndLicenseTests(unittest.TestCase):
+    """Proves: CP-004"""
+
+    def test_version_is_valid_semver_2_0_0(self):
+        version, _license = _load_pyproject_project_table()
+        self.assertRegex(version, _SEMVER_RE)
+
+    def test_license_is_the_spdx_apache_2_0_expression(self):
+        _version, license_expr = _load_pyproject_project_table()
+        self.assertEqual("Apache-2.0", license_expr)
+
+
+class ChangelogTests(unittest.TestCase):
+    """Proves: CP-004"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.path = REPO_ROOT / "CHANGELOG.md"
+        cls.text = cls.path.read_text(encoding="utf-8")
+
+    def test_changelog_exists_at_the_repository_root(self):
+        self.assertTrue(self.path.is_file())
+
+    def test_changelog_names_keep_a_changelog_and_semantic_versioning(self):
+        self.assertIn("Keep a Changelog", self.text)
+        self.assertIn("Semantic Versioning", self.text)
+
+    def test_changelog_starts_with_an_h1_named_changelog(self):
+        first_line = self.text.splitlines()[0]
+        self.assertEqual("# Changelog", first_line)
+
+    def test_every_version_heading_is_unreleased_or_a_dated_semver_entry(self):
+        headings = [line for line in self.text.splitlines() if line.startswith("## [")]
+        self.assertGreaterEqual(len(headings), 1, "no version heading found")
+        malformed = [line for line in headings if not _HEADING_RE.match(line)]
+        self.assertEqual([], malformed)
+
+
+class ConventionalCommitsDocumentedTests(unittest.TestCase):
+    """Proves: CP-004"""
+
+    def test_agents_md_documents_conventional_commits(self):
+        text = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
+        self.assertIn("Conventional Commits", text)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,73 @@
+[build-system]
+# Approved build backend (STANDARDS.md §11.1, CP-014; decision record #157).
+# Build-time only: the built distribution still declares zero runtime
+# dependencies (LP-001, CP-003). Upper bound follows uv's own documented
+# recommendation while uv_build is pre-1.0.
+requires = ["uv_build>=0.12.13,<0.13"]
+build-backend = "uv_build"
+
+[project]
+name = "semlog"
+version = "0.1.0"
+description = "Zero-dependency structured JSON logging for Python, built entirely on the standard library, aligned with OpenTelemetry's log data model and W3C Trace Context."
+readme = "README.md"
+requires-python = ">=3.10"
+# SPDX license expression (PEP 639); the full text ships at the repository
+# root and, for the built distribution, under *.dist-info/licenses/ only
+# (never inside the importable package -- task 4.23/A7 verifies this).
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Framework :: FastAPI",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Logging",
+]
+# CP-003/LP-001: the built distribution declares zero runtime dependencies.
+dependencies = []
+
+# Maintainer identity: public GitHub handle only. No contact address is
+# declared, because package metadata is published permanently and PyPI does
+# not require one; security reports go through SECURITY.md instead.
+authors = [{ name = "flaviopifiator" }]
+
+[project.urls]
+Homepage = "https://github.com/flaviopifiator/semlog"
+Repository = "https://github.com/flaviopifiator/semlog"
+Issues = "https://github.com/flaviopifiator/semlog/issues"
+Changelog = "https://github.com/flaviopifiator/semlog/blob/main/CHANGELOG.md"
+
+[dependency-groups]
+# Dev-only tooling (CP-008/CP-013): ruff for lint and format. The
+# compatibility-matrix and benchmark subjects (FastAPI, Django, loguru,
+# structlog) are approved by CP-013 but belong to later tasks
+# (4.10-4.13, 5.x), not this batch.
+dev = [
+    "ruff>=0.13",
+]
+
+[tool.ruff]
+# Pinned explicitly (CP-008, task 4.2) so lint/format behavior is fixed by
+# this file rather than by whichever defaults the installed `ruff` release
+# happens to ship; the codebase (including this batch's new tests) is
+# written to pass `ruff`'s real default rule selection, already exercised
+# by the `# noqa: BLE001`/`S110`/`SIM905`/`G101`/`RUF022` markers already
+# present in `src/`. A dedicated `select`/`extend-select` override, and
+# making this configuration identical to what CI runs, is deferred to the
+# CI workflow task (4.1/4.25, out of this batch's scope).
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.format]
+# Defaults (double quotes, trailing commas where added, 4-space indent)
+# match the codebase as already written; declared explicitly so format
+# behavior does not depend on ruff's evolving defaults.
+quote-style = "double"
+indent-style = "space"

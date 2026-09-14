@@ -1,0 +1,157 @@
+"""Packaging metadata tests (task 4.3/4.4; STANDARDS.md LP-001, CP-003,
+CP-015).
+
+Checks what `pyproject.toml` itself declares, without building a wheel
+(the full-fidelity built-artifact check is a later task; see
+`tests/test_wheel_contents.py` for a graceful-skip precursor added in this
+same batch): the built distribution's `dependencies` list stays empty
+(LP-001, CP-003), the declared build backend is the approved `uv_build`
+(CP-014, already proven separately once its own anti-drift tasks land),
+and the public-surface facts already proven by
+`tests/test_public_surface.py` (CP-015, 8 names) and
+`tests/test_class_budget.py` (CP-017, 6 classes/0 ABCs) still hold at the
+packaging layer -- these two are re-asserted here as supporting,
+non-``Proves``-tagged checks, since their own modules already carry the
+citations that make them count toward traceability.
+
+On Python 3.10 there is no stdlib TOML reader (the same constraint
+`_identity.py::_read_pyproject` documents for SI-001/SI-005), so this
+module falls back to a narrow, regex-based check of the same fact rather
+than bundling a third-party TOML parser.
+"""
+
+from __future__ import annotations
+
+import re
+import sys
+import unittest
+from pathlib import Path
+
+import semlog
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+
+
+def _pyproject_text() -> str:
+    return PYPROJECT_PATH.read_text(encoding="utf-8")
+
+
+def _load_pyproject():
+    """Parse `pyproject.toml` with stdlib `tomllib` (3.11+ only); returns
+    `None` on Python 3.10, where callers fall back to a text-based check."""
+    if sys.version_info < (3, 11):
+        return None
+    import tomllib
+
+    with PYPROJECT_PATH.open("rb") as handle:
+        return tomllib.load(handle)
+
+
+class ZeroRuntimeDependenciesTests(unittest.TestCase):
+    """Proves: CP-003, LP-001"""
+
+    def test_project_dependencies_list_is_empty(self):
+        data = _load_pyproject()
+        if data is not None:
+            self.assertEqual([], data["project"].get("dependencies", []))
+            return
+        match = re.search(r"(?m)^dependencies\s*=\s*(\[[^\]]*\])", _pyproject_text())
+        self.assertIsNotNone(match, "no top-level `dependencies` key found")
+        self.assertEqual("[]", re.sub(r"\s+", "", match.group(1)))
+
+    def test_dev_tooling_lives_outside_project_dependencies(self):
+        """Dev-only tooling (ruff) must be declared in `[dependency-groups]`,
+        a table pyproject metadata never surfaces as `Requires-Dist`, never
+        in `[project.optional-dependencies]` (which WOULD ship as extras)."""
+        text = _pyproject_text()
+        self.assertIn("[dependency-groups]", text)
+        self.assertNotIn("[project.optional-dependencies]", text)
+
+
+class BuildBackendDeclaredTests(unittest.TestCase):
+    """Supporting checks for the `[build-system]` table this batch writes;
+    no `Proves` tag here (CP-014 is fully proven only once its own
+    anti-drift tasks land -- see `pyproject.toml`'s own comment)."""
+
+    def test_build_backend_is_uv_build_pinned_as_standards_prescribes(self):
+        data = _load_pyproject()
+        if data is not None:
+            build_system = data["build-system"]
+            self.assertEqual("uv_build", build_system["build-backend"])
+            self.assertEqual(["uv_build>=0.12.13,<0.13"], build_system["requires"])
+            return
+        text = _pyproject_text()
+        self.assertIn('build-backend = "uv_build"', text)
+        self.assertIn('"uv_build>=0.12.13,<0.13"', text)
+
+
+def _classifiers():
+    data = _load_pyproject()
+    if data is not None:
+        return data["project"].get("classifiers", [])
+    match = re.search(r"(?m)^classifiers\s*=\s*\[([^\]]*)\]", _pyproject_text())
+    return re.findall(r'"([^"]+)"', match.group(1)) if match else []
+
+
+def _ci_supported_pythons():
+    """The CI test matrix's Python versions, without the one allowed to fail."""
+    ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    matrix = re.search(r"(?m)^\s*python:\s*\[([^\]]*)\]", ci_text).group(1)
+    allowed_to_fail = set(re.findall(r"matrix\.python == '([^']+)'", ci_text))
+    versions = [v.strip().strip('"') for v in matrix.split(",")]
+    return [v for v in versions if v not in allowed_to_fail]
+
+
+class ClassifiersTests(unittest.TestCase):
+    """PyPI classifiers stay consistent with what the repository verifies:
+    the Python versions of the CI test matrix (without the one allowed to
+    fail), the two frameworks of the compatibility matrix, and the SPDX
+    license expression. Supporting checks, no `Proves` tag: CP-001, CP-002
+    and CP-004 are proven by their own modules."""
+
+    def test_python_version_classifiers_match_the_ci_test_matrix(self):
+        prefix = "Programming Language :: Python :: "
+        declared = [c[len(prefix) :] for c in _classifiers() if c.startswith(prefix)]
+        self.assertEqual(_ci_supported_pythons(), declared)
+        self.assertEqual(["3.10", "3.11", "3.12", "3.13", "3.14"], declared)
+
+    def test_framework_license_platform_topic_and_status_classifiers(self):
+        classifiers = _classifiers()
+        for expected in (
+            "Framework :: FastAPI",
+            "Framework :: Django",
+            "License :: OSI Approved :: Apache Software License",
+            "Operating System :: OS Independent",
+            "Topic :: System :: Logging",
+            "Development Status :: 3 - Alpha",
+        ):
+            with self.subTest(classifier=expected):
+                self.assertIn(expected, classifiers)
+        self.assertIn('license = "Apache-2.0"', _pyproject_text())
+
+    def test_classifiers_are_sorted_and_unique(self):
+        classifiers = _classifiers()
+        self.assertEqual(sorted(set(classifiers)), classifiers)
+
+
+class PackagingLayerSurfaceFactsTests(unittest.TestCase):
+    """Re-affirms, at the packaging layer, facts already proven under CP-015
+    (`tests/test_public_surface.py`) and CP-017's class budget
+    (`tests/test_class_budget.py`); no new `Proves` tag needed here."""
+
+    def test_public_surface_is_exactly_eight_names(self):
+        self.assertEqual(8, len(semlog.__all__))
+
+    def test_requires_python_floor_matches_cp_001(self):
+        data = _load_pyproject()
+        if data is not None:
+            self.assertEqual(">=3.10", data["project"]["requires-python"])
+            return
+        self.assertIn('requires-python = ">=3.10"', _pyproject_text())
+
+
+if __name__ == "__main__":
+    unittest.main()
