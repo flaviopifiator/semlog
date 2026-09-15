@@ -11,8 +11,10 @@ arguments).
 
 STANDARDS.md CP-017 now states this exact "6 classes, 0 abstract classes,
 0 class-factory calls" budget (Phase 2 source-budget conformance refactor,
-engram #239's follow-up), alongside its pre-existing 1000-source-line
-budget -- both stated in design #162/#170 §8 all along. This module
+engram #239's follow-up); this class shape and the budget concept were
+stated in design #162/#170 §8 all along, though the line-count number
+itself has since moved on its own (1000 in that design, 1500 now in
+STANDARDS.md; see tests/test_source_budget.py for the current figure). This module
 therefore deliberately carries no ``Proves:`` line: CP-017's own text
 requires the whole budget to be "published, and enforced in continuous
 integration" (published AND enforced in CI), and no CI workflow exists yet

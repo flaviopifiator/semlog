@@ -36,7 +36,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_DIR = REPO_ROOT / "src" / "semlog"
 STANDARDS_PATH = REPO_ROOT / "STANDARDS.md"
 
-BUDGET = 1200
+BUDGET = 1500
 EXCLUDED_FILENAMES = frozenset({"_uuid7_fallback.py"})
 
 _IGNORED_TOKEN_TYPES = frozenset(
