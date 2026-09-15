@@ -215,6 +215,10 @@ Each record is rendered on the calling thread and queued for a single writer thr
 | `overflow="drop"` | The call never waits. At 90% capacity, records below `WARNING` are dropped; the last 10% is reserved for `WARNING`, `ERROR` and `CRITICAL`. Every drop is counted and reported | Application latency matters more than log completeness |
 | `queue=False` | Synchronous write, with no queue and no writer thread | Short scripts, debugging, environments without threads |
 
+### Hybrid mode
+
+In `hybrid` mode, only records logged with `semlog=True` reach semlog's own JSON output; every other line stays exactly as it already prints. This suppression targets `logging.StreamHandler` and its subclasses only. A handler outside that synchronous dispatch, such as a `logging.handlers.QueueHandler` paired with a `QueueListener`, or a `logging.handlers.MemoryHandler`, may still render a marked record as text; this is a documented limitation, not a defect.
+
 ## Output
 
 Every record is one JSON object per line, in UTF-8. This record was logged inside an `operation()` that received a `traceparent` header, and is indented here for reading; semlog never indents its output:

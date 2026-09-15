@@ -5,6 +5,7 @@ counts against the class budget. `current()` returns it directly."""
 
 from __future__ import annotations
 
+import logging
 import os
 from types import SimpleNamespace
 
@@ -110,6 +111,10 @@ def configure(
             f"catalog_mode must be one of {_CATALOG_MODES}, got "
             f"{resolved_catalog_mode!r}"
         )
+    if resolved_mode == "hybrid" and capture_loggers:
+        # LM-003: hybrid never takes root, so there is no pipeline handler
+        # a captured logger's records could propagate to instead.
+        raise ValueError("capture_loggers is not supported in hybrid mode")
 
     if resolved_mode == "off":
         # LM-005: as if semlog were not installed -- nothing else runs.
@@ -117,6 +122,10 @@ def configure(
         _modes.state.marking = False
         return
 
+    # Hybrid defers its pyproject diagnostic (SI-005 erratum 8): no
+    # pipeline exists yet to carry it as JSON, so it is collected here and
+    # emitted after install(), marked `semlog=True`.
+    pending_diagnostics = [] if resolved_mode == "hybrid" else None
     _state.identity = resolve_identity(
         service_name=service_name,
         service_version=service_version,
@@ -127,6 +136,7 @@ def configure(
         identity_levels=identity_levels,
         namespace=namespace,
         search_dir=search_dir,
+        diagnostics=pending_diagnostics,
     )
     _state.namespace, _state.catalog = namespace, catalog
     _state.catalog_mode = resolved_catalog_mode
@@ -162,6 +172,21 @@ def configure(
         # root's handlers and level exactly as found.
         _attach_root(handler, level=_LEVELS[level], replace_all=True)
         _capture_loggers(capture_loggers)
+    else:
+        # Hybrid never takes root: only detach a handler THIS library left
+        # there from an earlier full configure(), never a foreign one.
+        root = logging.getLogger()
+        for existing in list(root.handlers):
+            if getattr(existing, "_semlog_root", False):
+                root.removeHandler(existing)
+        _modes.arm_routing()
 
+    # `marking`/`mode` are the very last things this call touches: a second
+    # call that raises during validation above must never reach this point,
+    # so it leaves both exactly as the last successful call left them
+    # (validation-4 minor).
     _modes.state.mode = resolved_mode
-    _modes.state.marking = False
+    _modes.state.marking = resolved_mode == "hybrid"
+
+    if pending_diagnostics:
+        logging.getLogger("semlog").info(pending_diagnostics[0], semlog=True)

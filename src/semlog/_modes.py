@@ -9,8 +9,11 @@ from __future__ import annotations
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
+
+from . import _transport
 
 MODES = ("full", "hybrid", "off")
 
@@ -119,3 +122,49 @@ def _arm_keyword():
 
 
 _arm_keyword()
+
+
+# LM-003 (design D4): the thread-local dispatch identity that hides a
+# marked record from `StreamHandler` instances and subclasses during the
+# ONE dispatch pass that follows semlog's own direct delivery; a nested
+# dispatch (a handler that itself logs) restores the outer identity in
+# `finally`, so nesting can never leak into the wrong record.
+_dispatching = threading.local()
+
+_routing_armed = False
+
+
+def arm_routing():
+    """Arm hybrid's routing wrappers once per process, never disarmed
+    (design D4): a marked record reaches semlog's own installed handler
+    exactly once, then dispatches through the original `callHandlers` with
+    that record hidden only from `logging.StreamHandler` instances and
+    subclasses; every other handler (for example a non-`StreamHandler`
+    observer) receives the record unchanged, marker already gone."""
+    global _routing_armed
+    if _routing_armed:
+        return
+    _routing_armed = True
+
+    original_call_handlers = logging.Logger.callHandlers
+    original_stream_handle = logging.StreamHandler.handle
+
+    def _call_handlers(self, record):
+        handler = _transport._state.handler
+        if handler is None or record.__dict__.pop(MARKER, None) is None:
+            return original_call_handlers(self, record)
+        handler.handle(record)
+        previous = getattr(_dispatching, "record", None)
+        _dispatching.record = record
+        try:
+            return original_call_handlers(self, record)
+        finally:
+            _dispatching.record = previous
+
+    def _stream_handle(self, record):
+        if getattr(_dispatching, "record", None) is record:
+            return False
+        return original_stream_handle(self, record)
+
+    logging.Logger.callHandlers = _call_handlers
+    logging.StreamHandler.handle = _stream_handle

@@ -215,6 +215,10 @@ Cada registro se renderiza en el hilo que hace la llamada y se encola para un ú
 | `overflow="drop"` | La llamada nunca espera. Al 90 % de ocupación se descartan los registros por debajo de `WARNING`; el 10 % restante se reserva para `WARNING`, `ERROR` y `CRITICAL`. Cada descarte se cuenta y se reporta | La latencia de la aplicación importa más que la completitud del registro |
 | `queue=False` | Escritura síncrona, sin cola ni hilo escritor | Scripts cortos, depuración, entornos sin hilos |
 
+### Modo hybrid
+
+En modo `hybrid`, solo los registros marcados con `semlog=True` llegan a la salida JSON propia de semlog; el resto de las líneas se imprime exactamente igual que antes. Esta supresión se dirige únicamente a `logging.StreamHandler` y sus subclases. Un manejador fuera de ese despacho síncrono, como un `logging.handlers.QueueHandler` emparejado con un `QueueListener`, o un `logging.handlers.MemoryHandler`, puede seguir renderizando un registro marcado como texto; esto es una limitación documentada, no un defecto.
+
 ## Salida
 
 Cada registro es un objeto JSON por línea, en UTF-8. Este registro se emitió dentro de un `operation()` que recibió un encabezado `traceparent`, y aquí se muestra con sangría para facilitar la lectura; semlog nunca agrega sangría a su salida:

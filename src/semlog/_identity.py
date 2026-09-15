@@ -72,8 +72,15 @@ def resolve_identity(
     identity_levels: tuple[str, ...] = ("role", "component"),
     namespace: str = "app",
     search_dir: str | Path | None = None,
+    diagnostics: list[str] | None = None,
 ) -> dict[str, object]:
-    """Resolve every resource-identity field (SI-001..005), design #162 §4.1 order."""
+    """Resolve every resource-identity field (SI-001..005), design #162 §4.1
+    order. `diagnostics`, when given a list, collects the pyproject
+    diagnostic instead of emitting it immediately, so a caller whose own
+    output pipeline does not exist yet (hybrid mode, before install()) can
+    defer and emit it later, marked `semlog=True` (SI-005 erratum 8).
+    `diagnostics=None` (the default) keeps full mode's 0.1.0 behavior:
+    logging immediately."""
     if identity is not None and len(identity) != len(identity_levels):
         raise ValueError(
             f"identity has {len(identity)} values, identity_levels declares "
@@ -94,7 +101,10 @@ def resolve_identity(
             search_dir if search_dir is not None else Path.cwd()
         )
         if diagnostic:
-            _DIAGNOSTIC_LOGGER.info(diagnostic, semlog=True)
+            if diagnostics is None:
+                _DIAGNOSTIC_LOGGER.info(diagnostic, semlog=True)
+            else:
+                diagnostics.append(diagnostic)
         resolved_name = pyproject_name
     if not resolved_name:
         resolved_name = f"unknown_service:{Path(sys.argv[0]).name or 'python'}"

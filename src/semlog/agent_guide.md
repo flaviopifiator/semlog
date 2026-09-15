@@ -211,12 +211,17 @@ All `configure()` parameters are keyword-only; there is no settings object or di
 | Transport | `queue` | `True` | `False` = synchronous write, no internal queue, no writer thread |
 | Transport | `queue_size` | `10000` | maximum queued lines; `configure()` raises `ValueError` for a non-positive value |
 | Transport | `overflow` | `"block"` | `"block"` waits for room (default, nothing lost); `"drop"` never waits and drops low-severity records first; any other value raises `ValueError` |
+| Mode | `mode` | `None` (resolves to `"full"`) | `"full"`, `"hybrid"` or `"off"`; parameter > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"`; any other value raises `ValueError` naming the value and its source |
 | Catalog | `catalog` | `None` | event catalog document (JSON) |
 | Catalog | `catalog_mode` | `"off"` without a catalog, `"warn"` with one | `"off"`, `"warn"`, `"strict"` |
 
-Recognized environment variables: `OTEL_SERVICE_NAME`; `OTEL_RESOURCE_ATTRIBUTES` (for `service.namespace`, `service.version`, `service.instance.id`, `deployment.environment.name`, and as a fallback for `service.name`); the pairs `OTEL_ATTRIBUTE_COUNT_LIMIT`/`OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT` and `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`/`OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`.
+Recognized environment variables: `OTEL_SERVICE_NAME`; `OTEL_RESOURCE_ATTRIBUTES` (for `service.namespace`, `service.version`, `service.instance.id`, `deployment.environment.name`, and as a fallback for `service.name`); the pairs `OTEL_ATTRIBUTE_COUNT_LIMIT`/`OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT` and `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`/`OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`; `SEMLOG_MODE` (for `mode`).
 
 On Python 3.11 and later, `service_name` and `service_version` are detected by reading `pyproject.toml` with stdlib `tomllib`. Python 3.10 has no `tomllib`, and semlog does not bundle a third-party TOML reader: on 3.10, `pyproject.toml` is not read at all, resolution falls back to the explicit parameter, the `OTEL_*` variables, or installed package metadata, and a distinct startup diagnostic notes that detection was skipped for this reason (not because the file was missing).
+
+### Hybrid mode limitation
+
+In `mode="hybrid"`, only records logged with `semlog=True` reach semlog's own JSON output; every other line prints exactly as it already does. This suppression targets `logging.StreamHandler` and its subclasses only. A handler outside that synchronous dispatch, such as a `logging.handlers.QueueHandler` paired with a `QueueListener`, or a `logging.handlers.MemoryHandler`, may still render a marked record as text; this is a documented limitation, not a defect.
 
 ## FastAPI recipe
 

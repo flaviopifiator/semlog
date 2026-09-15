@@ -182,5 +182,32 @@ class ReadmeParityPerturbationTests(unittest.TestCase):
         self.assertNotEqual(_badge_set(self.english), _badge_set(mutated))
 
 
+class ReadmeModesParityTests(unittest.TestCase):
+    """LM-004 (errata 12): both README editions must document hybrid mode's
+    suppression limitation, naming `StreamHandler` as the suppression
+    scope and both `QueueHandler`/`QueueListener` and `MemoryHandler` as
+    handlers that may still render a marked record as text. No `Proves:`
+    line yet: LM-004 is not declared in STANDARDS.md until Phase 7 of this
+    change; tag this class `Proves: LM-004` once that declaration lands.
+    The mode/precedence/keyword narrative itself is a later documentation
+    work unit; this class covers only the limitation text landing now."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.texts = {language: readme_text(language) for language in READMES}
+
+    def test_both_editions_document_the_streamhandler_only_scope(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertIn("StreamHandler", text)
+
+    def test_both_editions_name_queuehandler_and_memoryhandler_as_exceptions(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertIn("QueueHandler", text)
+                self.assertIn("QueueListener", text)
+                self.assertIn("MemoryHandler", text)
+
+
 if __name__ == "__main__":
     unittest.main()
