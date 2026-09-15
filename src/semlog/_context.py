@@ -118,7 +118,7 @@ def bind(attributes: Mapping[str, object]) -> None:
         if not _bind_warned:
             _bind_warned = True
             logging.getLogger("semlog").warning(
-                "semlog.log.bind_ignored", stack_info=True
+                "semlog.log.bind_ignored", stack_info=True, semlog=True
             )
         return
     push(

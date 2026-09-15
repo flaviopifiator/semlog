@@ -6,12 +6,18 @@ State lives in one module-level `types.SimpleNamespace`, not a class
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 MODES = ("full", "hybrid", "off")
+
+# LM-002: the internal marker attribute a marked, armed call attaches to
+# its `extra`; never visible in any output, since hybrid's routing wrapper
+# (WU4) pops it before any handler ever runs.
+MARKER = "_semlog_marked"
 
 # `marking` starts False: no hybrid routing is armed at import (design D2).
 state = SimpleNamespace(mode="full", marking=False)
@@ -74,3 +80,42 @@ def _initial_mode():
 
 
 state.mode = _initial_mode()
+
+
+def _log(
+    self,
+    level,
+    msg,
+    args,
+    exc_info=None,
+    extra=None,
+    stack_info=False,
+    stacklevel=1,
+    semlog=False,
+    **kwargs,
+):
+    """`logging.Logger._log` replacement (LM-002): accepts the keyword-only
+    `semlog` argument in every mode, before `configure()` ever runs, and
+    never raises. Only attaches `MARKER` while `state.marking` is armed
+    (hybrid, once its pipeline is installed -- WU4); the caller's `extra`
+    is never mutated in place, only ever copied. `stacklevel` is bumped by
+    exactly one to compensate for this wrapper's own extra call frame, so
+    caller-visible metadata (`filename`, `lineno`, `funcName`, `module`)
+    stays identical to the same call site without the keyword."""
+    if semlog and state.marking:
+        extra = {**extra, MARKER: True} if extra else {MARKER: True}
+    _log._semlog_original(
+        self, level, msg, args, exc_info, extra, stack_info, stacklevel + 1, **kwargs
+    )
+
+
+def _arm_keyword():
+    """Patch `logging.Logger._log` at import time; idempotent via the true
+    original stashed on the wrapper itself, so a defensive re-arm never
+    wraps twice (which would double the `stacklevel` bump)."""
+    current = logging.Logger._log
+    _log._semlog_original = getattr(current, "_semlog_original", current)
+    logging.Logger._log = _log
+
+
+_arm_keyword()

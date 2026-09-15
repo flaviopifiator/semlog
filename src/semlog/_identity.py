@@ -94,7 +94,7 @@ def resolve_identity(
             search_dir if search_dir is not None else Path.cwd()
         )
         if diagnostic:
-            _DIAGNOSTIC_LOGGER.info(diagnostic)
+            _DIAGNOSTIC_LOGGER.info(diagnostic, semlog=True)
         resolved_name = pyproject_name
     if not resolved_name:
         resolved_name = f"unknown_service:{Path(sys.argv[0]).name or 'python'}"

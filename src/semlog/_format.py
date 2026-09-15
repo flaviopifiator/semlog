@@ -341,7 +341,10 @@ class Formatter(logging.Formatter):
                 if self._catalog_mode == "strict":
                     raise ValueError(f"catalog violation on {event_name!r}: {joined}")
                 _DIAGNOSTIC_LOGGER.warning(
-                    "%s.log.catalog_violation: %s", self._namespace, joined
+                    "%s.log.catalog_violation: %s",
+                    self._namespace,
+                    joined,
+                    semlog=True,
                 )
 
         # Bound context never overrides a call-site attribute; baggage does.
