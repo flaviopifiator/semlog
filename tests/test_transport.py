@@ -658,10 +658,11 @@ sys.stderr.write("OK\\n")
         raises `queue.Full` there, `after_in_parent()` then starts a SECOND
         writer alongside the still-alive first one, and the next fork's
         before() deadlocks joining a writer that will never see its own
-        sentinel. Runs in a subprocess with signal.alarm in both the parent
-        (bounding the whole loop) and each child (bounding a hung child),
-        plus an outer subprocess.run timeout, so a regression fails cleanly
-        instead of hanging the suite."""
+        sentinel. Runs in a subprocess with signal.alarm re-armed in the
+        parent before each individual fork/waitpid pair (bounding that one
+        fork, not the whole loop) and set again in each child (bounding a
+        hung child), plus an outer subprocess.run timeout, so a regression
+        fails cleanly instead of hanging the suite."""
         src_dir = str(Path(__file__).resolve().parents[1] / "src")
         script = f"""
 import logging, os, signal, sys, threading, time
@@ -902,12 +903,22 @@ class FlushDeadWriterTests(unittest.TestCase):
         # bare `.stop()` on those can raise `RuntimeError`/`queue.Full`,
         # not just `_safe_stop`'s `AttributeError`. Reset state FIRST, so a
         # broken writer this class built on purpose can never leak into a
-        # later test's `install()` idempotent-reset check either way.
+        # later test's `install()` idempotent-reset check either way. The
+        # queue is drained before `.stop()` runs, so a still-full queue left
+        # behind by a deliberately-broken writer can never make this
+        # cleanup step itself block.
         writer = _transport._state.writer
+        handler = _transport._state.handler
         _transport._state.handler = None
         _transport._state.writer = None
         _transport._state.stream = None
         _transport._state.was_running = False
+        if isinstance(handler, SemlogQueueHandler):
+            while True:
+                try:
+                    handler.queue.get_nowait()
+                except queue.Empty:
+                    break
         if writer is not None:
             try:
                 writer.stop()
@@ -970,12 +981,18 @@ class FlushDeadWriterTests(unittest.TestCase):
         the resulting `RuntimeError: cannot join thread before it is
         started` -- reached through the real `_start_writer()` ->
         `Writer.start()` -> `Thread.start()` path, not a hand-built
-        `_thread` attribute."""
+        `_thread` attribute. The queue is filled to capacity first, so this
+        also exercises `enqueue_sentinel()`'s non-blocking branch for a
+        writer that is not alive: a mutant that always blocks the sentinel
+        put (instead of only when the writer is alive and draining) would
+        otherwise hang here forever, since nothing ever drains this queue.
+        `_shutdown()` runs on a bounded, joined thread, so that mutant fails
+        in bounded time instead of hanging the whole suite."""
         stream = io.BytesIO()
         handler = _transport.install(
-            Formatter(identity=_identity()), queue_size=8, stream=stream
+            Formatter(identity=_identity()), queue_size=1, stream=stream
         )
-        handler.queue.put('{"event_name":"app.pending"}')
+        handler.queue.put_nowait('{"event_name":"app.pending"}')  # fills the queue
 
         with (
             mock.patch.object(
@@ -989,7 +1006,18 @@ class FlushDeadWriterTests(unittest.TestCase):
         ):
             _transport._start_writer()
 
-        _transport._shutdown()  # must not raise
+        result = {}
+
+        def call_shutdown():
+            _transport._shutdown()
+            result["done"] = True
+
+        t = threading.Thread(target=call_shutdown, daemon=True)
+        t.start()
+        t.join(timeout=2)
+        self.assertTrue(
+            result.get("done", False), "_shutdown() did not return within 2s"
+        )
 
     def test_shutdown_survives_a_full_queue_when_stopping_the_writer(self):
         """The queue.Full variant of the same 3.12.0 shutdown crash shape:
