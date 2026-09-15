@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from ._baggage import defaults as _baggage_defaults
 from ._format import Formatter
 from ._identity import resolve_identity
+from ._transport import capture_loggers as _capture_loggers
 from ._transport import install as _install_pipeline
 
 _CATALOG_MODES = ("off", "warn", "strict")
@@ -56,16 +57,6 @@ def _resolve_limit(explicit: int | None, kind: str, default: int | None) -> int 
             except ValueError:
                 continue
     return default
-
-
-def _capture_third_party_loggers(names: tuple[str, ...]) -> None:
-    """Remove a third-party logger's own handlers and turn propagation on,
-    so its records reach the pipeline `configure()` just installed."""
-    for name in names:
-        captured = logging.getLogger(name)
-        for existing in list(captured.handlers):
-            captured.removeHandler(existing)
-        captured.propagate = True
 
 
 def configure(
@@ -156,4 +147,4 @@ def configure(
         root.removeHandler(existing)
     root.addHandler(handler)
     root.setLevel(_LEVELS[level])
-    _capture_third_party_loggers(capture_loggers)
+    _capture_loggers(capture_loggers)

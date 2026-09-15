@@ -1,5 +1,8 @@
 """Transport: bounded queue, overflow, lazy-start writer, fork safety, flush
-(design #162 §1.1/§2.1/§3.4/§6.2/§6.4; LP-003/006/007/008/009/010, CP-006)."""
+(design #162 §1.1/§2.1/§3.4/§6.2/§6.4; LP-003/006/007/008/009/010, CP-006).
+Stream resolution is robust to a replaced `sys.stdout`/`sys.stderr` that
+lacks a `.buffer` attribute; `flush()` detects a dead writer thread and
+returns promptly instead of waiting out its full timeout (LP-006/011)."""
 
 from __future__ import annotations
 
@@ -13,6 +16,7 @@ import os
 import queue as _queue
 import sys
 import threading
+import time
 from types import SimpleNamespace
 
 _WARNING = logging.WARNING
@@ -36,6 +40,27 @@ def _ignore(fn, exc=Exception):
         fn()
     except exc:
         pass
+
+
+def _resolve_stream(explicit, primary, fallback):
+    """Resolve the binary write stream: `explicit`, else `primary.buffer`,
+    else `fallback.buffer`; `None` when neither has one (LP-006)."""
+    if explicit is not None:
+        return explicit
+    stream = getattr(primary, "buffer", None)
+    if stream is not None:
+        return stream
+    return getattr(fallback, "buffer", None)
+
+
+def _text_handler(sink):
+    """UTF-8, backslashreplace `StreamHandler` over `sink`; `close()` only
+    flushes, since `sink` may be a shared `sys.stdout`/`stderr` buffer."""
+    text = io.TextIOWrapper(
+        sink, encoding="utf-8", errors="backslashreplace", newline="\n"
+    )
+    text.close = text.flush  # never close a shared process-level buffer
+    return logging.StreamHandler(text)
 
 
 class SemlogQueueHandler(logging.handlers.QueueHandler):
@@ -94,11 +119,22 @@ class Writer(logging.handlers.QueueListener):
         self._stream = stream
         self._reported = 0
 
+    def enqueue_sentinel(self):
+        # A live writer drains the queue: wait for room instead of raising queue.Full.
+        self.queue.put(self._sentinel, block=_writer_alive(self))
+
     def handle(self, record):
-        stream = self._stream if self._stream is not None else sys.stdout.buffer
+        # Resolution itself must never raise (LP-006): a replaced `sys.stdout`
+        # without a `.buffer` attribute, or no stdout at all, must not kill
+        # this thread or leave a flush marker unset.
+        try:
+            stream = _resolve_stream(self._stream, sys.stdout, sys.__stdout__)
+        except Exception:  # noqa: BLE001 -- resolution itself must never raise
+            stream = None
         if isinstance(record, threading.Event):
-            _ignore(stream.flush)  # best-effort flush before releasing the caller
-            record.set()
+            if stream is not None:
+                _ignore(stream.flush)  # best-effort flush before releasing the caller
+            record.set()  # always set, even on a failed/absent stream
             return
         try:
             stream.write(record.encode("utf-8", "backslashreplace") + b"\n")
@@ -138,14 +174,17 @@ def _start_writer():
 
 
 def _direct_handler(stream):
-    """Build the `queue=False` synchronous handler (design #162/#170 §3.3):
-    a plain stdlib `StreamHandler` writing UTF-8 with `backslashreplace`, no
-    internal queue and no writer thread -- like a bare stdlib `StreamHandler`."""
-    sink = stream if stream is not None else sys.stdout.buffer
-    text = io.TextIOWrapper(
-        sink, encoding="utf-8", errors="backslashreplace", newline="\n"
-    )
-    return logging.StreamHandler(text)
+    """`queue=False` synchronous handler (design #162/#170 §3.3): a plain
+    UTF-8/backslashreplace `StreamHandler`, no queue and no writer thread,
+    robust to a `sys.stdout` without `.buffer` (LP-006); `NullHandler` when
+    neither `sys.stdout` nor `sys.__stdout__` has one."""
+    try:
+        sink = _resolve_stream(stream, sys.stdout, sys.__stdout__)
+    except Exception:  # noqa: BLE001 -- resolution itself must never raise
+        sink = None
+    if sink is None:
+        return logging.NullHandler()
+    return _text_handler(sink)
 
 
 def install(
@@ -178,18 +217,30 @@ def install(
 
 
 def _shutdown():
-    """Drain and stop the writer before atexit's own teardown, switching the
-    root handler to a direct, threadless one (design §6.4)."""
+    """Drain/stop the writer before atexit's teardown; swap `_state.handler`
+    to a direct stderr handler whether or not it was attached to root (only
+    the root handler list is touched when it was, LP-012). Stopping the
+    writer ignores any exception, not only `AttributeError`: on 3.12.0,
+    `QueueListener.start()` assigns `_thread` before `Thread.start()` can
+    raise, so a failed start can leave a writer whose `.stop()` raises
+    `RuntimeError: cannot join thread before it is started`; a full queue
+    makes the same `.stop()` call raise `queue.Full` instead."""
     handler = _state.handler
     if _state.writer is not None:
         flush(timeout=5)
-        _ignore(_state.writer.stop, AttributeError)
+        _ignore(_state.writer.stop)
         _state.writer = None
-    root = logging.getLogger()
-    if isinstance(handler, SemlogQueueHandler) and handler in root.handlers:
-        direct = logging.StreamHandler()
+    if isinstance(handler, SemlogQueueHandler):
+        try:
+            sink = _resolve_stream(None, sys.stderr, sys.__stderr__)
+            direct = _text_handler(sink) if sink is not None else logging.NullHandler()
+        except Exception:  # noqa: BLE001 -- a closed sys.stderr raises ValueError here
+            direct = logging.NullHandler()
         direct.setFormatter(handler.formatter)
-        root.handlers[root.handlers.index(handler)] = direct
+        direct._semlog_root = True  # so a later attach_root() can remove it
+        root = logging.getLogger()
+        if handler in root.handlers:
+            root.handlers[root.handlers.index(handler)] = direct
         _state.handler = direct
 
 
@@ -221,13 +272,81 @@ def _register_at_fork():
     )
 
 
+_FLUSH_SLICE = 0.05
+
+
+def _writer_alive(writer):
+    thread = getattr(writer, "_thread", None)
+    return thread is not None and thread.is_alive()
+
+
 def flush(timeout=None):
-    """Block until everything enqueued before this call is written (design §6.4)."""
+    """Block until everything enqueued before this call is written (design
+    §6.4). Returns promptly, without waiting out `timeout`, once the writer
+    thread is dead or was never started (LP-011); it does not start one, so
+    any record already queued when that happens stays queued, undelivered,
+    until something else starts a writer."""
     handler = _state.handler
     if handler is None or not isinstance(handler, SemlogQueueHandler):
         return
-    if _state.writer is None:
-        _start_writer()
+    writer = _state.writer
+    if writer is None or not _writer_alive(writer):
+        return
     marker = threading.Event()
-    handler.queue.put(marker)
-    marker.wait(timeout=timeout)
+    deadline = None if timeout is None else time.monotonic() + timeout
+    try:
+        if deadline is None:
+            handler.queue.put(marker)
+        else:
+            handler.queue.put(marker, timeout=max(0.0, deadline - time.monotonic()))
+    except _queue.Full:
+        return
+    # The wait runs in slices bounded by what remains of `timeout`, so a
+    # writer that dies mid-wait, or a deadline that passes, still returns
+    # promptly -- including a `timeout=0` caller, which must not wait out a
+    # full slice.
+    while True:
+        if deadline is None:
+            slice_timeout = _FLUSH_SLICE
+        else:
+            slice_timeout = min(_FLUSH_SLICE, max(0.0, deadline - time.monotonic()))
+        if marker.wait(timeout=slice_timeout):
+            return
+        if not _writer_alive(writer):
+            return
+        if deadline is not None and time.monotonic() >= deadline:
+            return
+
+
+def attach_root(handler, level=None):
+    """Attach `handler` to root, replacing every previously attached
+    semlog handler and leaving every other handler untouched; for later
+    mode-resolution work (design D2), not yet called by anything in this
+    module. Tracks "previously attached" by marking each handler this
+    function itself attaches, rather than reading `_state.handler`:
+    `install()` already overwrites `_state.handler` before `attach_root()`
+    runs, so `_state.handler` can no longer identify a handler a prior
+    call left on root, and it would otherwise stay there as an orphan.
+    Sets an explicit `level` on root only when given, so a caller whose
+    level must stay untouched can pass `None`."""
+    root = logging.getLogger()
+    for existing in list(root.handlers):
+        if existing is not handler and getattr(existing, "_semlog_root", False):
+            root.removeHandler(existing)
+    handler._semlog_root = True
+    if handler not in root.handlers:
+        root.addHandler(handler)
+    if level is not None:
+        root.setLevel(level)
+    _state.handler = handler
+
+
+def capture_loggers(names):
+    """Detach every handler already registered on each named logger and
+    turn propagation on, so its records reach the handler this module
+    installed on root instead (design D2)."""
+    for name in names:
+        captured = logging.getLogger(name)
+        for existing in list(captured.handlers):
+            captured.removeHandler(existing)
+        captured.propagate = True
