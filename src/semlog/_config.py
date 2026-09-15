@@ -5,13 +5,14 @@ counts against the class budget. `current()` returns it directly."""
 
 from __future__ import annotations
 
-import logging
 import os
 from types import SimpleNamespace
 
+from . import _modes
 from ._baggage import defaults as _baggage_defaults
 from ._format import Formatter
 from ._identity import resolve_identity
+from ._transport import attach_root as _attach_root
 from ._transport import capture_loggers as _capture_loggers
 from ._transport import install as _install_pipeline
 
@@ -82,9 +83,13 @@ def configure(
     queue: bool = True,
     queue_size: int = 10000,
     overflow: str = "block",
+    mode: str | None = None,
     search_dir: str | None = None,
 ) -> None:
-    """Resolve identity and validate configuration; last call wins."""
+    """Resolve identity and validate configuration; last call wins. `mode`
+    (LM-001) resolves before any other work, so an invalid value raises
+    before anything else in this process is touched."""
+    resolved_mode = _modes.resolve_mode(mode, search_dir=search_dir)
     if level not in _LEVELS:
         raise ValueError(f"level must be one of {sorted(_LEVELS)}, got {level!r}")
     if catalog is not None and not isinstance(catalog, dict):
@@ -96,12 +101,21 @@ def configure(
     if not (isinstance(queue_size, int) and queue_size > 0):
         raise ValueError(f"queue_size must be a positive int, got {queue_size!r}")
 
-    default_mode = "off" if catalog is None else "warn"
-    resolved_mode = default_mode if catalog_mode is None else catalog_mode
-    if resolved_mode not in _CATALOG_MODES:
+    default_catalog_mode = "off" if catalog is None else "warn"
+    resolved_catalog_mode = (
+        default_catalog_mode if catalog_mode is None else catalog_mode
+    )
+    if resolved_catalog_mode not in _CATALOG_MODES:
         raise ValueError(
-            f"catalog_mode must be one of {_CATALOG_MODES}, got {resolved_mode!r}"
+            f"catalog_mode must be one of {_CATALOG_MODES}, got "
+            f"{resolved_catalog_mode!r}"
         )
+
+    if resolved_mode == "off":
+        # LM-005: as if semlog were not installed -- nothing else runs.
+        _modes.state.mode = "off"
+        _modes.state.marking = False
+        return
 
     _state.identity = resolve_identity(
         service_name=service_name,
@@ -115,7 +129,7 @@ def configure(
         search_dir=search_dir,
     )
     _state.namespace, _state.catalog = namespace, catalog
-    _state.catalog_mode = resolved_mode
+    _state.catalog_mode = resolved_catalog_mode
     _state.max_attributes = _resolve_limit(max_attributes, "COUNT", 128)
     _state.max_attribute_length = _resolve_limit(
         max_attribute_length, "VALUE_LENGTH", None
@@ -130,7 +144,7 @@ def configure(
         namespace=namespace,
         baggage_prefix=baggage_prefix,
         catalog=catalog,
-        catalog_mode=resolved_mode,
+        catalog_mode=resolved_catalog_mode,
         max_attributes=_state.max_attributes,
         max_attribute_length=_state.max_attribute_length,
         redact_keys=redact_keys,
@@ -142,9 +156,12 @@ def configure(
         queue_size=queue_size,
         overflow=overflow,
     )
-    root = logging.getLogger()
-    for existing in list(root.handlers):
-        root.removeHandler(existing)
-    root.addHandler(handler)
-    root.setLevel(_LEVELS[level])
-    _capture_loggers(capture_loggers)
+
+    if resolved_mode == "full":
+        # LP-010: full always sets an explicit root level; hybrid leaves
+        # root's handlers and level exactly as found.
+        _attach_root(handler, level=_LEVELS[level], replace_all=True)
+        _capture_loggers(capture_loggers)
+
+    _modes.state.mode = resolved_mode
+    _modes.state.marking = False

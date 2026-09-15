@@ -176,6 +176,7 @@ Todos los parámetros de `configure()` son de solo palabra clave (*keyword-only*
 | Transporte | `queue` | `True` | `False` escribe de forma síncrona, sin cola interna ni hilo escritor |
 | Transporte | `queue_size` | `10000` | cantidad máxima de líneas en la cola |
 | Transporte | `overflow` | `"block"` | `"block"` o `"drop"`, ver [Desborde de la cola](#desborde-de-la-cola) |
+| Modo | `mode` | `None` (se resuelve a `"full"`) | `"full"`, `"hybrid"` o `"off"`; parámetro > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"` |
 | Catálogo | `catalog` | `None` | documento del catálogo de eventos (JSON) |
 | Catálogo | `catalog_mode` | `"off"` sin catálogo, `"warn"` con catálogo | `"off"`, `"warn"` o `"strict"` |
 

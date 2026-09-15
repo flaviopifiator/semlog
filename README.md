@@ -176,6 +176,7 @@ Every `configure()` parameter is keyword-only; there is no settings object or di
 | Transport | `queue` | `True` | `False` writes synchronously, with no internal queue and no writer thread |
 | Transport | `queue_size` | `10000` | maximum number of queued lines |
 | Transport | `overflow` | `"block"` | `"block"` or `"drop"`, see [Queue overflow](#queue-overflow) |
+| Mode | `mode` | `None` (resolves to `"full"`) | `"full"`, `"hybrid"` or `"off"`; parameter > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"` |
 | Catalog | `catalog` | `None` | event catalog document (JSON) |
 | Catalog | `catalog_mode` | `"off"` without a catalog, `"warn"` with one | `"off"`, `"warn"` or `"strict"` |
 

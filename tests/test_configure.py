@@ -148,6 +148,51 @@ class PipelineWiringTests(unittest.TestCase):
         self.assertIsInstance(root.handlers[0], _transport.SemlogQueueHandler)
 
 
+class FullModeReplacesForeignRootHandlersTests(unittest.TestCase):
+    """Regression guard: base `6ced2d2`'s `configure()` removed EVERY root
+    handler and installed its own; full mode must keep exactly that
+    behavior (decisions #292, #301 item 8 -- full output unchanged from
+    0.1.0), not `attach_root()`'s selective semlog-only removal. A
+    pre-existing foreign handler (for example a console handler a host
+    application's own `logging.config`/Django `LOGGING` already
+    installed) must not survive a full `configure()` call, or its plain
+    text output duplicates every JSON line."""
+
+    def tearDown(self):
+        reset_pipeline()
+
+    def test_a_foreign_root_handler_is_removed_by_full_configure(self):
+        root = logging.getLogger()
+        foreign_stream = io.StringIO()
+        foreign_handler = logging.StreamHandler(foreign_stream)
+        root.addHandler(foreign_handler)
+        fake_stdout = FakeStdout()
+        try:
+            with (
+                mock.patch("sys.stdout", fake_stdout),
+                mock.patch.dict("os.environ", {}, clear=True),
+            ):
+                configure(mode="full", service_name="svc", search_dir=".")
+                self.assertNotIn(foreign_handler, root.handlers)
+                logging.getLogger("semlog.tests.foreign").info("app.event")
+                _transport.flush(timeout=2)
+        finally:
+            root.removeHandler(foreign_handler)
+        self.assertEqual("", foreign_stream.getvalue())
+        line = json.loads(fake_stdout.buffer.getvalue().decode("utf-8").strip())
+        self.assertEqual("app.event", line["event_name"])
+
+    def test_repeat_full_configure_leaves_exactly_one_semlog_handler(self):
+        root = logging.getLogger()
+        foreign_handler = logging.StreamHandler(io.StringIO())
+        root.addHandler(foreign_handler)
+        with mock.patch.dict("os.environ", {}, clear=True):
+            configure(mode="full", service_name="svc-a", search_dir=".")
+            configure(mode="full", service_name="svc-b", search_dir=".")
+        self.assertEqual(1, len(root.handlers))
+        self.assertIsInstance(root.handlers[0], _transport.SemlogQueueHandler)
+
+
 def _logging_app(environ, start_response):
     start_response("200 OK", [("Content-Type", "text/plain")])
     logging.getLogger("semlog.tests.configure.baggage").info("app.request.handled")

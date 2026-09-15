@@ -34,11 +34,12 @@ def configure(
     queue: bool = True,
     queue_size: int = 10000,
     overflow: str = "block",
+    mode: str | None = None,
     search_dir: str | None = None,
 ) -> None: ...
 ```
 
-The single entry point. Call it exactly once, at process start, before the application starts logging. All parameters are keyword-only; there is no settings object and no settings dict. Calling it twice is safe: the last call wins, and the previous writer is drained and stopped. An invalid value or combination raises `ValueError` immediately, never later at runtime (for example, an `overflow` outside `"block"`/`"drop"`, or a non-positive `queue_size`). `search_dir` overrides the directory `pyproject.toml` detection searches upward from (instead of the current working directory); most callers never need it.
+The single entry point. Call it exactly once, at process start, before the application starts logging. All parameters are keyword-only; there is no settings object and no settings dict. Calling it twice is safe: the last call wins, and the previous writer is drained and stopped. An invalid value or combination raises `ValueError` immediately, never later at runtime (for example, an `overflow` outside `"block"`/`"drop"`, or a non-positive `queue_size`). `search_dir` overrides the directory `pyproject.toml` detection searches upward from (instead of the current working directory); most callers never need it. `mode` selects `"full"` (default), `"hybrid"` or `"off"`; precedence is the `mode` parameter, then `SEMLOG_MODE`, then `[tool.semlog].mode` (3.11+), then `"full"`.
 
 `capture_loggers` removes a third-party logger's own handlers (for example a server's error/access logger) and turns propagation on, so its records flow through the same pipeline instead of a separate one. `baggage_allow`/`baggage_prefix`/`accept_inbound_baggage` set the process-wide default: `operation()`, `WSGIMiddleware`, and `ASGIMiddleware` each still accept their own `baggage_allow` (see below) to override it per instance, but a plain `WSGIMiddleware(app)` with no `baggage_allow` uses the value configured here. `accept_inbound_baggage=False` makes every middleware/`operation()` ignore an inbound `baggage` header entirely, regardless of any allowlist. `queue=False` writes every record synchronously, on the caller's own thread, with no internal queue and no writer thread, like a plain stdlib `StreamHandler`.
 

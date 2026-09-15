@@ -318,20 +318,20 @@ def flush(timeout=None):
             return
 
 
-def attach_root(handler, level=None):
-    """Attach `handler` to root, replacing every previously attached
-    semlog handler and leaving every other handler untouched; for later
-    mode-resolution work (design D2), not yet called by anything in this
-    module. Tracks "previously attached" by marking each handler this
-    function itself attaches, rather than reading `_state.handler`:
-    `install()` already overwrites `_state.handler` before `attach_root()`
-    runs, so `_state.handler` can no longer identify a handler a prior
-    call left on root, and it would otherwise stay there as an orphan.
-    Sets an explicit `level` on root only when given, so a caller whose
-    level must stay untouched can pass `None`."""
+def attach_root(handler, level=None, *, replace_all=False):
+    """Attach `handler` to root. `replace_all=True` (full mode) removes
+    every existing root handler first, matching base 0.1.0 behavior
+    (decisions #292/#301 item 8); the default removes only a handler this
+    function itself previously attached (tracked via `_semlog_root`, not
+    `_state.handler`, since `install()` already overwrites that before
+    this runs), leaving a foreign handler alone -- used when a mode
+    switch detaches a stale handler without taking root outright. Sets
+    `level` on root only when given."""
     root = logging.getLogger()
     for existing in list(root.handlers):
-        if existing is not handler and getattr(existing, "_semlog_root", False):
+        if existing is handler:
+            continue
+        if replace_all or getattr(existing, "_semlog_root", False):
             root.removeHandler(existing)
     handler._semlog_root = True
     if handler not in root.handlers:
