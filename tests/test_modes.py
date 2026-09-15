@@ -209,5 +209,44 @@ class ModeStateReloadTests(unittest.TestCase):
                 _modes._routing_armed = saved_routing_armed
 
 
+class PreConfigureOffTests(unittest.TestCase):
+    """`SEMLOG_MODE=off` is read at import time (no file I/O), so it is
+    honored even before `configure()` ever runs (LM-005)."""
+
+    def setUp(self):
+        import semlog._context as context_module
+
+        self._context_module = context_module
+        self._saved_warned = context_module._bind_warned
+        context_module._bind_warned = False
+        self._saved_mode = _modes.state.mode
+        self._saved_marking = _modes.state.marking
+
+    def tearDown(self):
+        self._context_module._bind_warned = self._saved_warned
+        _modes.state.mode = self._saved_mode
+        _modes.state.marking = self._saved_marking
+
+    def test_initial_mode_reads_semlog_mode_env_var_without_file_io(self):
+        with mock.patch.dict("os.environ", {"SEMLOG_MODE": "off"}, clear=True):
+            self.assertEqual("off", _modes._initial_mode())
+
+    def test_bind_before_configure_stays_silent_when_initial_mode_is_off(self):
+        _modes.state.mode = "off"  # simulates import-time SEMLOG_MODE=off
+        from semlog._context import bind, current
+
+        logger = logging.getLogger("semlog")
+        sentinel = []
+        handler = logging.Handler()
+        handler.emit = lambda record: sentinel.append(record)
+        logger.addHandler(handler)
+        try:
+            bind({"app.a": 1})  # must not raise, must not warn
+        finally:
+            logger.removeHandler(handler)
+        self.assertEqual([], sentinel)
+        self.assertIsNone(current())
+
+
 if __name__ == "__main__":
     unittest.main()

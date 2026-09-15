@@ -85,6 +85,12 @@ def _initial_mode():
 state.mode = _initial_mode()
 
 
+def is_off():
+    """Shared off-mode guard (LM-005), reused by `_context.py` and
+    `_middleware.py` instead of each comparing `state.mode` inline."""
+    return state.mode == "off"
+
+
 def _log(
     self,
     level,
