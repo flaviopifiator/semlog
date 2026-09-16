@@ -33,6 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `app.add_middleware(semlog.ASGIMiddleware, ...)` recipe alongside the
   existing wrapper recipe, with its exception-handler caveat, in
   README.md, README.es.md, the agent guide and llms.txt.
+- Documentation for the remaining integration routes, so each framework
+  section now covers every supported way in, with a note on which to
+  choose: the FastAPI wrapper recipe beside `add_middleware`, and the
+  Django `WSGIMiddleware`/`ASGIMiddleware` wrapper around
+  `get_wsgi_application()`/`get_asgi_application()`, with the note that
+  Django converts a view exception into a 500 response before the wrapper
+  sees it, so that route cannot attach the traceback.
+- Documentation for hybrid mode's root logger level: hybrid leaves that
+  level as it found it, the standard library leaves it at `WARNING`, and
+  an `INFO` record marked `semlog=True` (the `http.server.request`
+  completion event included) is filtered out before hybrid's routing
+  runs. `configure(level=...)` applies in `full` mode only, so the
+  application sets the root level itself.
+- A README opening that says what semlog is before anything else, and a
+  `Philosophy` section stating the positions the library is built on,
+  in both editions.
 - A PEP 561 `py.typed` marker inside the package, so a type checker reads
   the annotations semlog already carries instead of ignoring the package.
 - PyPI keywords, a `Documentation` project URL and the
@@ -49,6 +65,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budget and the 6-class budget); only the no-abstract-base-class and
   no-class-factory rules remain, with human review as the guardrail
   against unbounded growth. `tests/test_source_budget.py` is deleted.
+- The recipe caveats move from code comments into prose: a fenced block
+  is byte-identical across both README editions, so a caveat written
+  inside one reached a Spanish reader in English.
+
+### Fixed
+
+- The FastAPI wrapper example registered its routes on the already
+  wrapped object, so copying it raised `AttributeError` on import. The
+  wrapping line now comes after the routes, in both README editions and
+  in the agent guide.
+- Both README editions showed `"telemetry.sdk.version":"0.2.0"` in
+  records presented as real output of a 0.3.0 package. The value is now
+  checked against the version `pyproject.toml` declares.
 
 ## [0.2.0] - 2026-09-15
 
