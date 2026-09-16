@@ -14,7 +14,8 @@ each one is checked against that source instead of being trusted:
   checker's own parser (`tests/test_traceability.py`).
 - No coverage badge and no percentage anywhere: coverage is not measured
   (`coverage.py` is not an approved tool, CP-008/CP-013).
-- PyPI: present only inside an HTML comment until the first release.
+- PyPI: the live version badge of the published project, linking to its
+  page on PyPI, and never left behind inside an HTML comment.
 
 Not tied to a single STANDARDS.md requirement id (same precedent as
 `tests/test_class_budget.py`): these checks keep published claims
@@ -46,6 +47,8 @@ CI_BADGE_IMAGE = (
 )
 CI_RUNS_URL = "https://github.com/flaviopifiator/semlog/actions/workflows/ci.yml"
 PYPI_BADGE_IMAGE = "https://img.shields.io/pypi/v/semlog"
+PYPI_PROJECT_URL = "https://pypi.org/project/semlog/"
+PYPI_BADGE_LINE = f"[![PyPI]({PYPI_BADGE_IMAGE})]({PYPI_PROJECT_URL})"
 
 
 def shields_static(image_url):
@@ -184,13 +187,14 @@ class ReadmeBadgeFactTests(unittest.TestCase):
                 ]
                 self.assertEqual([], offenders)
 
-    def test_pypi_badge_is_only_present_as_an_html_comment(self):
+    def test_pypi_badge_is_enabled_and_links_to_the_project_page(self):
         for language, text in self.texts.items():
             with self.subTest(language=language):
-                self.assertNotIn(
-                    PYPI_BADGE_IMAGE, [image for _a, image, _l in badges(text)]
-                )
                 self.assertIn(
+                    (PYPI_BADGE_IMAGE, PYPI_PROJECT_URL),
+                    [(image, link) for _alt, image, link in badges(text)],
+                )
+                self.assertNotIn(
                     PYPI_BADGE_IMAGE,
                     [image for _a, image, _l in commented_badges(text)],
                 )
@@ -216,26 +220,29 @@ class ReadmeBadgePerturbationTests(unittest.TestCase):
         )
 
     def test_a_static_tests_passing_percentage_badge_is_caught(self):
+        tests_badge = (
+            "[![tests](https://img.shields.io/badge/tests-100%25-green)](README.md)"
+        )
         mutated = self.text.replace(
-            "\n<!--",
-            "\n[![tests](https://img.shields.io/badge/tests-100%25-green)](README.md)\n<!--",
-            1,
+            PYPI_BADGE_LINE, f"{PYPI_BADGE_LINE}\n{tests_badge}", 1
         )
         self.assertNotEqual(mutated, self.text)
         images = [image for _alt, image, _link in badges(mutated)]
         self.assertTrue(any("%" in urllib.parse.unquote(image) for image in images))
 
-    def test_an_enabled_pypi_badge_is_caught(self):
-        mutated = "\n".join(
-            line
-            for line in self.text.splitlines()
-            if line not in ("<!-- Enable after the first PyPI release:", "-->")
+    def test_a_commented_out_pypi_badge_is_caught(self):
+        mutated = self.text.replace(PYPI_BADGE_LINE, f"<!-- {PYPI_BADGE_LINE} -->", 1)
+        self.assertNotEqual(mutated, self.text)
+        self.assertNotIn(PYPI_BADGE_IMAGE, [image for _a, image, _l in badges(mutated)])
+        self.assertIn(
+            PYPI_BADGE_IMAGE, [image for _a, image, _l in commented_badges(mutated)]
         )
-        self.assertIn(PYPI_BADGE_IMAGE, [image for _a, image, _l in badges(mutated)])
 
     def test_a_commented_out_coverage_badge_is_still_caught(self):
         coverage = "[![coverage](https://img.shields.io/badge/coverage-90%25-green)](x)"
-        mutated = self.text.replace("-->", coverage + "\n-->", 1)
+        mutated = self.text.replace(
+            PYPI_BADGE_LINE, f"{PYPI_BADGE_LINE}\n<!--\n{coverage}\n-->", 1
+        )
         self.assertNotEqual(mutated, self.text)
         images = [image for _alt, image, _link in commented_badges(mutated)]
         self.assertTrue(any("coverage" in image for image in images), images)

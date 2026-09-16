@@ -117,12 +117,7 @@ PyPI checks the workflow filename and the environment of the job that publishes.
 | Workflow name | `tag.yml` | `release.yml` |
 | Environment name | `pypi` | `pypi` |
 
-semlog is not on PyPI yet, so the first publication creates the project. Register a "pending" publisher (**Your account > Publishing**) for the workflow that will publish first:
-
-- `release.yml` if you will [publish an existing tag](#publish-an-existing-tag), for example `v0.1.0` created while the repository was private;
-- `tag.yml` if the first publication comes straight from a merge.
-
-Then add the other publisher on the project's own **Publishing** page. A pending publisher does not reserve the name until it is used.
+semlog already exists on PyPI, so register both publishers on the project's own **Publishing** page. A "pending" publisher (**Your account > Publishing**) is only for a project that does not exist yet, and it does not reserve the name until it is used.
 
 ### 4. Protect `main`
 

@@ -18,9 +18,7 @@
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](pyproject.toml)
 [![Requirements proven: 104/104](https://img.shields.io/badge/requirements%20proven-104%2F104-brightgreen)](STANDARDS.md)
-<!-- Enable after the first PyPI release:
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
--->
 
 ## Why semlog
 
@@ -34,10 +32,22 @@ Application code keeps using `logging.getLogger(__name__)`; semlog decides what 
 
 ## Installation
 
-semlog requires Python 3.10 or later. It is not on PyPI yet, so install it from the Git repository:
+semlog requires Python 3.10 or later.
 
 ```bash
-pip install "git+https://github.com/flaviopifiator/semlog.git"
+pip install semlog
+```
+
+With uv, add semlog to a project:
+
+```bash
+uv add semlog
+```
+
+Or install it into an environment:
+
+```bash
+uv pip install semlog
 ```
 
 ## Quick start
