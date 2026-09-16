@@ -20,22 +20,33 @@
 [![Requirements proven: 110/110](https://img.shields.io/badge/requirements%20proven-110%2F110-brightgreen)](STANDARDS.md)
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
 
+## Qué es semlog
+
+semlog es una biblioteca de registro para servicios en Python. El código de la aplicación sigue llamando a `logging.getLogger(__name__)` y a los métodos estándar de `Logger`; semlog define la forma de cada registro resultante y lo escribe como un objeto JSON por línea en `stdout`.
+
+El nombre es `semantic` más `log`, por las Semantic Conventions de OpenTelemetry: la especificación que fija cómo se llama cada campo de telemetría y qué significa. semlog aplica esos nombres a los registros, de modo que `service.name`, `trace_id` y `url.path` significan lo mismo en todos los servicios que los emiten.
+
+Esa es la diferencia con el texto libre del mensaje. `f"User {user_id} purchased {quantity} units"` obliga a que lo lea una persona, o a que lo interprete una regla de parseo escrita una vez por servicio. Un campo con un nombre y un significado estables, en cambio, se puede consultar, agregar y usar en alertas entre servicios, sin ninguna regla de parseo.
+
+Los middlewares WSGI, ASGI y de Django leen `traceparent`, `tracestate` y el `baggage` permitido de la solicitud entrante, así que todos los registros de una solicitud llevan el mismo `trace_id`, e `inject()` propaga ese contexto a las llamadas salientes; no se necesita ningún SDK de trazas. Los loggers de terceros que propagan hacia el logger raíz pasan por la misma tubería, y `capture_loggers` cubre los que instalan sus propios manejadores.
+
 ## Por qué semlog
 
-El código de la aplicación sigue llamando a `logging.getLogger(__name__)`. semlog define la forma de cada registro y convierte esa forma en un contrato.
-
-Dos propiedades deciden si encaja en un servicio determinado:
+Dos propiedades deciden si semlog encaja en un servicio que usted ya tiene:
 
 - **Entra en un servicio que ya está en ejecución.** En [modo `hybrid`](#modos), cada línea que el servicio imprime hoy sigue imprimiéndose de forma idéntica byte a byte. Una llamada marcada con `semlog=True` queda oculta de esa salida impresa y se convierte en un registro JSON. No hace falta reescribir antes ninguna línea de registro existente. `SEMLOG_MODE=off` devuelve el proceso a su comportamiento anterior en el siguiente arranque, sin cambios de código.
 - **Cero dependencias de tiempo de ejecución.** semlog está construido solo sobre la biblioteca estándar, y su rueda no declara ninguna entrada `Requires-Dist`. Eso importa donde cada dependencia nueva debe revisarse antes de llegar a producción.
 
-Lo que aporta el contrato en sí:
+## Filosofía
 
-- **Un contrato JSON estable.** El orden de los campos, sus tipos y las reglas de `null` están especificados en [STANDARDS.md](STANDARDS.md) y publicados como JSON Schema ([`schemas/log-record.schema.json`](schemas/log-record.schema.json)). Eliminar o renombrar un campo es un cambio de versión mayor.
-- **Nombres de campo de OpenTelemetry.** `severity_text`, `severity_number`, `trace_id`, `span_id`, `service.*` y `telemetry.sdk.*` siguen el modelo de datos de logs de OpenTelemetry, con las Semantic Conventions fijadas en la versión v1.44.0.
-- **W3C Trace Context integrado.** Los middlewares WSGI y ASGI leen `traceparent`, `tracestate` y el `baggage` permitido, e `inject()` los propaga en las llamadas salientes. No se necesita ningún SDK de trazas.
-- **Una sola tubería para todos los loggers.** Los loggers de terceros que propagan hacia el logger raíz pasan por la misma tubería, y `capture_loggers` cubre los que instalan sus propios manejadores.
-- **Trazabilidad de requisitos.** Cada requisito normativo de STANDARDS.md tiene un identificador y al menos una prueba que lo cita. La suite falla cuando un requisito no tiene ninguna prueba que lo cite.
+semlog toma unas pocas posiciones sobre qué es un registro y sobre qué puede exigirle una biblioteca de registro al código que la rodea.
+
+- **Un registro es un contrato, no texto libre.** Los nombres de los campos, su orden y las reglas de `null` están especificados en [STANDARDS.md](STANDARDS.md) y publicados como JSON Schema ([`schemas/log-record.schema.json`](schemas/log-record.schema.json)). Eliminar o renombrar un campo es un cambio de versión mayor, y adoptar un renombrado posterior de las Semantic Conventions también lo es.
+- **La biblioteca estándar alcanza.** semlog está construido con `logging`, `json`, `contextvars` y `queue`, y la rueda construida no declara ninguna entrada `Requires-Dist`, así que adoptarlo no agrega nada a una revisión de dependencias.
+- **El código de la aplicación no debería tener que aprender una segunda API de registro.** Los puntos de llamada siguen usando `logging.getLogger(__name__)` y los métodos estándar de `Logger`, y la superficie pública son nueve nombres. semlog define la forma del registro en lugar de exigir que cada punto de llamada se reescriba contra un objeto logger propio de la biblioteca.
+- **La adopción debe ser reversible.** Una biblioteca que solo se puede adoptar reescribiendo cada línea de registro existente no llega a adoptarse en un servicio que ya está en ejecución, así que el modo `hybrid` no reescribe ninguna, y `SEMLOG_MODE=off` retira semlog desde el entorno, sin cambios de código. Ver [Modos](#modos).
+- **Una regla que ninguna prueba cita no es una regla.** Cada requisito normativo de [STANDARDS.md](STANDARDS.md) lleva un identificador y al menos una prueba que lo cita por ese identificador. La suite falla cuando un requisito no tiene ninguna prueba que lo pruebe, y cuando una prueba cita un identificador que no existe. Hoy STANDARDS.md declara 110 requisitos.
+- **Un nombre de campo debería significar lo mismo para una persona, para una herramienta y para un agente.** Los nombres no se inventan aquí: `severity_text`, `severity_number`, `trace_id`, `span_id`, `service.*` y `telemetry.sdk.*` siguen el modelo de datos de logs de OpenTelemetry y sus Semantic Conventions, fijadas en la versión v1.44.0, y la propagación de trazas sigue W3C Trace Context. La guía para agentes viaja dentro del paquete, de modo que un agente de código aplica las mismas reglas sin conexión (`python -m semlog llm`).
 
 ## Instalación
 
@@ -56,12 +67,6 @@ O para instalarlo en un entorno:
 ```bash
 uv pip install semlog
 ```
-
-## Qué significa el nombre
-
-`semlog` es `semantic` más `log`, por las Semantic Conventions de OpenTelemetry: la especificación que fija cómo se llama cada campo de telemetría y qué significa. semlog aplica esos nombres a los registros, de modo que `service.name`, `trace_id` y `url.path` significan lo mismo en todos los servicios que los emiten.
-
-Esa es la diferencia con el texto libre del mensaje. Un campo con un nombre y un significado estables se puede consultar, agregar y usar en alertas entre servicios, sin escribir una regla de parseo por servicio.
 
 ## Guía rápida
 

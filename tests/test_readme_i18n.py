@@ -26,6 +26,7 @@ from ._readme_support import (
     readme_text,
     section,
 )
+from .test_traceability import STANDARDS_PATH, parse_standards
 
 
 def configure_table_params(text, title):
@@ -182,7 +183,7 @@ class ReadmeParityPerturbationTests(unittest.TestCase):
         self.assertNotEqual(_badge_set(self.english), _badge_set(mutated))
 
 
-_OPENING_H2_KEYS = ("why", "installation", "name", "quick_start")
+_OPENING_H2_KEYS = ("what", "why", "philosophy", "installation", "quick_start")
 _SUMMARY_LINE_RE = re.compile(r"^\*\*\S.*\.\*\*$")
 # The two differentiators, as the ordered technical tokens that carry them:
 # the adoption story first (`hybrid`, the `semlog=True` keyword it needs, and
@@ -201,17 +202,50 @@ _INSTALL_COMMAND = "pip install semlog"
 # semlog` contains `pip install semlog`, so a substring check stays green
 # even when the plain `pip` instruction is gone.
 _INSTALL_BLOCK = ("bash", _INSTALL_COMMAND)
-# The name explanation: the two word parts, and the specification the name
-# refers to. All four stay untranslated in the Spanish edition, being code
-# spans and a proper noun.
+# The opening section's own job: say what semlog does, in the same terms
+# that explain the name. The two word parts and the specification the name
+# refers to all stay untranslated in the Spanish edition, being code spans
+# and a proper noun.
 _NAME_TOKENS = ("`semantic`", "`log`", "OpenTelemetry", "Semantic Conventions")
-# The one prose fact of the name section that IS translated, so it is looked
-# up per language (same precedent as `_SEARCH_DIRECTION_PHRASES` below): a
-# mutation applied IDENTICALLY to both editions defeats cross-file parity
-# alone, since the parity checks only compare one edition against the other.
+# The two prose facts of the opening section that ARE translated, so they
+# are looked up per language (same precedent as `_SEARCH_DIRECTION_PHRASES`
+# below): a mutation applied IDENTICALLY to both editions defeats cross-file
+# parity alone, since the parity checks only compare one edition against the
+# other. The first is why a named field beats message text; the second is
+# what the library actually does, the fact that used to sit three sections
+# further down.
 _NAME_RATIONALE_PHRASES = {
     "en": "stable name and a stable meaning",
     "es": "nombre y un significado estables",
+}
+_WHAT_IT_DOES_PHRASES = {
+    "en": "decides what every resulting record looks like",
+    "es": "define la forma de cada registro resultante",
+}
+# Philosophy: one language-neutral technical token per stated position, so
+# a section that drops a position cannot stay green. Presence only, never
+# order: unlike the two differentiators, the positions are not ranked.
+_PHILOSOPHY_TOKENS = (
+    "`schemas/log-record.schema.json`",
+    "`Requires-Dist`",
+    "`logging.getLogger(__name__)`",
+    "`hybrid`",
+    "`SEMLOG_MODE=off`",
+    "Semantic Conventions",
+    "W3C Trace Context",
+    "`python -m semlog llm`",
+)
+# The two philosophy claims carried by prose alone, per language.
+_PHILOSOPHY_PHRASES = {
+    "en": ("major version change", "at least one test that cites it"),
+    "es": ("cambio de versión mayor", "al menos una prueba que lo cita"),
+}
+# "STANDARDS.md declares N requirements" / "STANDARDS.md declara N
+# requisitos": N is checked against the real declaration count, never
+# trusted, the same way `tests/test_readme_badges.py` checks the badge.
+_REQUIREMENT_COUNT_RES = {
+    "en": re.compile(r"declares (\d+) requirements"),
+    "es": re.compile(r"declara (\d+) requisitos"),
 }
 
 _MODE_BULLET_MARKERS = ("- **`full`**:", "- **`hybrid`**:", "- **`off`**:")
@@ -241,12 +275,13 @@ def opening_problems(text, language):
     when it answers all three).
 
     The order is the check: a reader who has to scroll past a
-    configuration table to learn what the project does has already left.
-    So the H1 is followed immediately by a one-line summary, the first
-    four level-two sections are the "why", the install instructions, the
-    name explanation and the quick start, and the "why" section states the
-    two differentiators in a fixed order. Scoped to the relevant section
-    span via `section()`, never a whole-document `in` check, so an
+    configuration table to learn what the project does has already left,
+    and so has one who has to scroll past install instructions. So the H1
+    is followed immediately by a one-line summary, the first five
+    level-two sections are what semlog is, the "why", the philosophy, the
+    install instructions and the quick start, and the "why" section states
+    the two differentiators in a fixed order. Scoped to the relevant
+    section span via `section()`, never a whole-document `in` check, so an
     unrelated mention of the same token elsewhere in a 20+ KB document
     cannot satisfy it.
     """
@@ -289,21 +324,61 @@ def opening_problems(text, language):
     return problems
 
 
-def name_section_problems(text, language):
-    """Every way a README's name section fails to explain where the name
-    comes from and why that matters (empty when it explains both)."""
+def what_section_problems(text, language):
+    """Every way a README's opening section fails to say what semlog does,
+    where its name comes from and why that matters (empty when it says all
+    three)."""
     labels = READMES[language]
     try:
-        name_text = section(text, 2, labels["name"])
+        what_text = section(text, 2, labels["what"])
     except ValueError:
-        return ["no name section"]
+        return ["no what-semlog-is section"]
     problems = [
         f"missing name-explanation token {token!r}"
         for token in _NAME_TOKENS
-        if token not in name_text
+        if token not in what_text
     ]
-    if _NAME_RATIONALE_PHRASES[language] not in name_text:
+    if _NAME_RATIONALE_PHRASES[language] not in what_text:
         problems.append("missing stable-meaning rationale")
+    if _WHAT_IT_DOES_PHRASES[language] not in what_text:
+        problems.append("missing what-semlog-does statement")
+    return problems
+
+
+def declared_requirement_count():
+    """How many requirement IDs STANDARDS.md declares, counted with the
+    traceability checker's own parser (`tests/test_traceability.py`), the
+    same source `tests/test_readme_badges.py` checks the badge against."""
+    standards = parse_standards(STANDARDS_PATH.read_text(encoding="utf-8"))
+    return len(standards.declarations)
+
+
+def philosophy_problems(text, language):
+    """Every way a README's philosophy section fails to state the project's
+    positions and to state the requirement count correctly (empty when it
+    states all of them). Scoped to the section's own span, never a
+    whole-document check: every token below also appears somewhere else in
+    a 20+ KB document, so an unscoped check would be vacuous."""
+    labels = READMES[language]
+    try:
+        philosophy_text = section(text, 2, labels["philosophy"])
+    except ValueError:
+        return ["no Philosophy section"]
+    problems = [
+        f"missing philosophy token {token!r}"
+        for token in _PHILOSOPHY_TOKENS
+        if token not in philosophy_text
+    ]
+    problems += [
+        f"missing philosophy phrase {phrase!r}"
+        for phrase in _PHILOSOPHY_PHRASES[language]
+        if phrase not in philosophy_text
+    ]
+    match = _REQUIREMENT_COUNT_RES[language].search(philosophy_text)
+    if match is None:
+        problems.append("no stated requirement count")
+    elif int(match.group(1)) != declared_requirement_count():
+        problems.append(f"stated requirement count {match.group(1)} is stale")
     return problems
 
 
@@ -398,12 +473,12 @@ def env_var_table_problems(text, language):
 
 class ReadmeOpeningParityTests(unittest.TestCase):
     """The first screen of both editions: a one-line summary under the H1,
-    the two differentiators in order, and the install command, followed by
-    the section that explains where the name comes from. Not tied to a
-    single STANDARDS.md requirement id (same precedent as
-    `tests/test_class_budget.py`), so no `Proves:` line: DOC-002's parity
-    is proven above, and no requirement governs the order in which a
-    README introduces the project."""
+    a section that says what semlog is before anything else, the two
+    differentiators in order, the project's philosophy, and the install
+    command. Not tied to a single STANDARDS.md requirement id (same
+    precedent as `tests/test_class_budget.py`), so no `Proves:` line:
+    DOC-002's parity is proven above, and no requirement governs the order
+    in which a README introduces the project."""
 
     @classmethod
     def setUpClass(cls):
@@ -414,17 +489,22 @@ class ReadmeOpeningParityTests(unittest.TestCase):
             with self.subTest(language=language):
                 self.assertEqual([], opening_problems(text, language))
 
-    def test_both_editions_explain_the_name(self):
+    def test_both_editions_say_what_semlog_is_and_explain_the_name(self):
         for language, text in self.texts.items():
             with self.subTest(language=language):
-                self.assertEqual([], name_section_problems(text, language))
+                self.assertEqual([], what_section_problems(text, language))
+
+    def test_both_editions_state_the_philosophy(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertEqual([], philosophy_problems(text, language))
 
 
 class ReadmeOpeningPerturbationTests(unittest.TestCase):
-    """Every check `opening_problems` and `name_section_problems` performs
-    is demonstrated here to be capable of failing, against deliberately
-    broken in-memory copies of the real README text. The real files are
-    never written to."""
+    """Every check `opening_problems`, `what_section_problems` and
+    `philosophy_problems` performs is demonstrated here to be capable of
+    failing, against deliberately broken in-memory copies of the real
+    README text. The real files are never written to."""
 
     @classmethod
     def setUpClass(cls):
@@ -433,7 +513,8 @@ class ReadmeOpeningPerturbationTests(unittest.TestCase):
 
     def test_baseline_has_no_problems(self):
         self.assertEqual([], opening_problems(self.english, "en"))
-        self.assertEqual([], name_section_problems(self.english, "en"))
+        self.assertEqual([], what_section_problems(self.english, "en"))
+        self.assertEqual([], philosophy_problems(self.english, "en"))
 
     def test_a_missing_one_line_summary_is_caught(self):
         summary = next(
@@ -451,6 +532,17 @@ class ReadmeOpeningPerturbationTests(unittest.TestCase):
         # are useless to a reader who does not yet know what the project is.
         mutated = self.english.replace("## Installation", "## Aardvark", 1).replace(
             "## Why semlog", "## Installation", 1
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = opening_problems(mutated, "en")
+        self.assertTrue(any("opening sections are" in p for p in problems), problems)
+
+    def test_the_what_section_pushed_below_the_quick_start_is_caught(self):
+        # The regression the reordering exists for: the explanation of what
+        # semlog does used to sit three sections down, after the reader had
+        # already been asked to install it.
+        mutated = self.english.replace("## What semlog is", "## Aardvark", 1).replace(
+            "## Quick start", "## What semlog is", 1
         )
         self.assertNotEqual(mutated, self.english)
         problems = opening_problems(mutated, "en")
@@ -495,19 +587,21 @@ class ReadmeOpeningPerturbationTests(unittest.TestCase):
             opening_problems(mutated, "en"),
         )
 
-    def test_deleting_the_name_section_entirely_is_caught(self):
-        start = self.english.index("## What the name means")
-        end = self.english.index("## Quick start")
+    def test_deleting_the_what_section_entirely_is_caught(self):
+        start = self.english.index("## What semlog is")
+        end = self.english.index("## Why semlog")
         mutated = self.english[:start] + self.english[end:]
         self.assertNotEqual(mutated, self.english)
-        self.assertEqual(["no name section"], name_section_problems(mutated, "en"))
+        self.assertEqual(
+            ["no what-semlog-is section"], what_section_problems(mutated, "en")
+        )
 
-    def test_a_name_section_that_drops_the_specification_is_caught(self):
+    def test_a_what_section_that_drops_the_specification_is_caught(self):
         mutated = self.english.replace("Semantic Conventions", "conventions")
         self.assertNotEqual(mutated, self.english)
         self.assertIn(
             "missing name-explanation token 'Semantic Conventions'",
-            name_section_problems(mutated, "en"),
+            what_section_problems(mutated, "en"),
         )
 
     def test_name_rationale_mutated_identically_in_both_editions_is_caught(self):
@@ -518,11 +612,82 @@ class ReadmeOpeningPerturbationTests(unittest.TestCase):
         self.assertNotEqual(mutated_en, self.english)
         self.assertNotEqual(mutated_es, self.spanish)
         self.assertIn(
-            "missing stable-meaning rationale", name_section_problems(mutated_en, "en")
+            "missing stable-meaning rationale", what_section_problems(mutated_en, "en")
         )
         self.assertIn(
-            "missing stable-meaning rationale", name_section_problems(mutated_es, "es")
+            "missing stable-meaning rationale", what_section_problems(mutated_es, "es")
         )
+
+    def test_what_it_does_mutated_identically_in_both_editions_is_caught(self):
+        mutated_en = self.english.replace(_WHAT_IT_DOES_PHRASES["en"], "is nice", 1)
+        mutated_es = self.spanish.replace(_WHAT_IT_DOES_PHRASES["es"], "es lindo", 1)
+        self.assertNotEqual(mutated_en, self.english)
+        self.assertNotEqual(mutated_es, self.spanish)
+        self.assertIn(
+            "missing what-semlog-does statement",
+            what_section_problems(mutated_en, "en"),
+        )
+        self.assertIn(
+            "missing what-semlog-does statement",
+            what_section_problems(mutated_es, "es"),
+        )
+
+    def test_deleting_the_philosophy_section_entirely_is_caught(self):
+        start = self.english.index("## Philosophy")
+        end = self.english.index("## Installation")
+        mutated = self.english[:start] + self.english[end:]
+        self.assertNotEqual(mutated, self.english)
+        self.assertEqual(["no Philosophy section"], philosophy_problems(mutated, "en"))
+
+    def test_a_dropped_philosophy_position_is_caught(self):
+        philosophy = section(self.english, 2, "Philosophy")
+        bullet = next(
+            line
+            for line in philosophy.splitlines()
+            if line.startswith("- ") and "`Requires-Dist`" in line
+        )
+        mutated = self.english.replace(bullet + "\n", "", 1)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing philosophy token '`Requires-Dist`'",
+            philosophy_problems(mutated, "en"),
+        )
+
+    def test_a_philosophy_phrase_mutated_identically_in_both_editions_is_caught(self):
+        mutated_en = self.english.replace(
+            "major version change", "patch version change", 1
+        )
+        mutated_es = self.spanish.replace(
+            "cambio de versión mayor", "cambio de versión de parche", 1
+        )
+        self.assertNotEqual(mutated_en, self.english)
+        self.assertNotEqual(mutated_es, self.spanish)
+        self.assertIn(
+            "missing philosophy phrase 'major version change'",
+            philosophy_problems(mutated_en, "en"),
+        )
+        self.assertIn(
+            "missing philosophy phrase 'cambio de versión mayor'",
+            philosophy_problems(mutated_es, "es"),
+        )
+
+    def test_a_stale_requirement_count_is_caught(self):
+        real = declared_requirement_count()
+        for language, replacement in (
+            (
+                "en",
+                (f"declares {real} requirements", f"declares {real - 1} requirements"),
+            ),
+            ("es", (f"declara {real} requisitos", f"declara {real - 1} requisitos")),
+        ):
+            original = readme_text(language)
+            mutated = original.replace(*replacement, 1)
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    f"stated requirement count {real - 1} is stale",
+                    philosophy_problems(mutated, language),
+                )
 
 
 class ReadmeModesParityTests(unittest.TestCase):
