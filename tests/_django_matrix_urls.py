@@ -10,6 +10,7 @@ traceability checker skips it.
 from __future__ import annotations
 
 import logging
+import threading
 
 from django.http import JsonResponse
 from django.urls import path
@@ -27,7 +28,16 @@ async def async_view(request):
     return JsonResponse({"kind": "async"})
 
 
+async def async_thread_view(request):
+    """No JSON logging: the body itself carries the thread ident so a test
+    can compare it against the thread that started the event loop, proving
+    `DjangoMiddleware.__acall__` never hops to a `sync_to_async` worker
+    thread (HTM-008, design decision D1)."""
+    return JsonResponse({"thread_ident": threading.get_ident()})
+
+
 urlpatterns = [
     path("sync/", sync_view),
     path("async/", async_view),
+    path("async-thread/", async_thread_view),
 ]

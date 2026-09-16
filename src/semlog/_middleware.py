@@ -212,3 +212,87 @@ class ASGIMiddleware:
                 )
         finally:
             pop(token)
+
+
+class DjangoMiddleware:
+    """Django `settings.MIDDLEWARE` entry serving both synchronous and
+    asynchronous deployments through exactly one class (HTM-008), shaped
+    like Django's own dual-mode middleware idiom: `sync_capable`/
+    `async_capable = True`, with the instance itself marked coroutine-like
+    when `get_response` is async (design D1) so Django's own dispatch
+    never hands our returned coroutine to a `sync_to_async` thread hop."""
+
+    sync_capable = True
+    async_capable = True
+
+    def __init__(self, get_response, *, baggage_allow=None, log_requests=None):
+        self.get_response = get_response
+        self._baggage_allow = baggage_allow
+        # Resolution from the `SEMLOG_LOG_REQUESTS` Django setting, and the
+        # event this flag enables, both land in a later work unit; a plain
+        # falsy default keeps the constructor's full signature (design's
+        # interface) without behaving on it yet.
+        self._log_requests = bool(log_requests)
+        # HTM-008: `asyncio`/`inspect` are imported lazily here, never at
+        # `semlog` import time (design D2), so `import semlog` stays free
+        # of both even when Django itself is entirely absent.
+        import inspect
+
+        if hasattr(inspect, "markcoroutinefunction"):  # Python 3.12+
+            self.async_mode = inspect.iscoroutinefunction(get_response)
+            if self.async_mode:
+                inspect.markcoroutinefunction(self)
+            return
+        # Python 3.10/3.11 (asgiref/sync.py:56-69, reproduced): a native
+        # `async def` is detected by plain `inspect`, no `asyncio` import
+        # needed. `asyncio` is only imported when either that already
+        # found a coroutine function (to mark `self`) or `get_response`
+        # itself carries a `_is_coroutine` marker (another dual-mode
+        # middleware further down the chain) -- a plain, unmarked sync
+        # callable never triggers the import at all (CP-008/HTM-008).
+        self.async_mode = inspect.iscoroutinefunction(get_response)
+        if not self.async_mode and hasattr(get_response, "_is_coroutine"):
+            import asyncio
+
+            self.async_mode = (
+                get_response._is_coroutine is asyncio.coroutines._is_coroutine
+            )
+        if self.async_mode:
+            import asyncio
+
+            self._is_coroutine = asyncio.coroutines._is_coroutine
+
+    def __call__(self, request):
+        # Async marking check first: an async `get_response` always routes
+        # through `__acall__`, which owns its own `is_off()` check.
+        if self.async_mode:
+            return self.__acall__(request)
+        if _modes.is_off():
+            # LM-005: as if semlog were not installed -- no scope pushed,
+            # so inject()/bind() called from inside the view are inert.
+            return self.get_response(request)
+        snapshot = snapshot_from_headers(
+            request.headers.get, baggage_allow=self._baggage_allow
+        )
+        token = push(snapshot)
+        try:
+            response = self.get_response(request)
+        finally:
+            pop(token)
+        return response
+
+    async def __acall__(self, request):
+        if _modes.is_off():
+            return await self.get_response(request)
+        snapshot = snapshot_from_headers(
+            request.headers.get, baggage_allow=self._baggage_allow
+        )
+        token = push(snapshot)
+        try:
+            response = await self.get_response(request)
+        finally:
+            pop(token)
+        # Synchronous post-processing of the response, on the loop thread
+        # (design D1): no `sync_to_async` hop occurred, so reading a plain
+        # attribute here never raises.
+        return response

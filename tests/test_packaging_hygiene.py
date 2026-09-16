@@ -13,6 +13,7 @@ Conventional Commits convention for commit messages.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -142,6 +143,61 @@ class Changelog020Tests(unittest.TestCase):
         fixed = _subsection(self.section, "### Fixed")
         self.assertIsNotNone(fixed, "no ### Fixed subsection")
         self.assertTrue(fixed)
+
+
+class SemlogImportsWithoutDjangoTests(unittest.TestCase):
+    """Proves: CP-008
+
+    Runs in a child interpreter with `django` and `asgiref` blocked by a
+    `sys.meta_path` finder installed before `semlog` is ever imported:
+    `import semlog` must still succeed, `semlog.DjangoMiddleware` must
+    resolve and construct with no Django installed at all, and `django`,
+    `asgiref` and `asyncio` must all stay absent from `sys.modules`
+    afterward -- proving HTM-008's "MUST NOT import django or asgiref at
+    semlog import time" clause end to end, including the lazy
+    coroutine-detection shim inside `DjangoMiddleware.__init__`. The
+    HTM-008 half of this citation waits for STANDARDS.md's own HTM-008
+    entry (phase 5). Lives here, not in `tests/test_django_matrix.py`: it
+    must run in the **default** suite, where Django is genuinely absent,
+    not inside the `django-matrix` CI job where Django is installed."""
+
+    def test_semlog_imports_and_constructs_django_middleware_without_django(self):
+        src_dir = str(REPO_ROOT / "src")
+        script = f"""
+import sys
+
+
+class _BlockFinder:
+    def find_spec(self, name, path, target=None):
+        blocked = name == "django" or name.startswith("django.")
+        blocked = blocked or name == "asgiref" or name.startswith("asgiref.")
+        if blocked:
+            raise ImportError(f"blocked for this test: {{name}}")
+        return None
+
+
+sys.meta_path.insert(0, _BlockFinder())
+sys.path.insert(0, {src_dir!r})
+
+import semlog
+
+middleware = semlog.DjangoMiddleware(lambda request: request)
+assert middleware is not None
+
+for blocked_name in ("django", "asgiref", "asyncio"):
+    assert blocked_name not in sys.modules, f"{{blocked_name}} was imported"
+
+print("OK")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("OK", result.stdout)
 
 
 class ConventionalCommitsDocumentedTests(unittest.TestCase):
