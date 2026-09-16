@@ -484,5 +484,146 @@ class DjangoMiddlewareCoexistenceTests(_DjangoMiddlewareTestCase):
         self.assertNotEqual(events[0]["span_id"], events[1]["span_id"])
 
 
+@unittest.skipIf(django is None, "django is not installed in this environment")
+class DjangoMiddlewareStreamingTests(_DjangoMiddlewareTestCase):
+    """The bound context stays correctly bound throughout a synchronous
+    `StreamingHttpResponse` body, over both WSGI and ASGI: every chunk's
+    own log line carries the request's `trace_id`, and the completion
+    event's `event.duration` covers the whole streamed body, consumed
+    well after the middleware chain itself has already returned. No
+    `Proves:` line yet: waits for STANDARDS.md's own HTM-013 entry
+    (phase 5)."""
+
+    middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
+    service_name = "django-streaming"
+
+    def test_wsgi_sync_streaming_body_keeps_context_bound_per_chunk(self):
+        status, body = self._wsgi_get("/stream/", _TRACE_A)
+        self.assertEqual("200 OK", status)
+        self.assertEqual(b"chunk-0chunk-1chunk-2", body)
+        lines = self._lines()
+        chunk_lines = [
+            line for line in lines if line.get("event_name") == "matrix.stream_chunk"
+        ]
+        self.assertEqual(3, len(chunk_lines))
+        for line in chunk_lines:
+            self.assertEqual("a" * 32, line["trace_id"])
+        completion = [
+            line for line in lines if line.get("event_name") == "http.server.request"
+        ]
+        self.assertEqual(1, len(completion))
+        self.assertGreater(completion[0]["event.duration"], 0)
+
+    def test_asgi_sync_streaming_body_keeps_context_bound_per_chunk(self):
+        status, body = self._asgi_get("/stream/", _TRACE_A)
+        self.assertEqual(200, status)
+        self.assertEqual(b"chunk-0chunk-1chunk-2", body)
+        lines = self._lines()
+        chunk_lines = [
+            line for line in lines if line.get("event_name") == "matrix.stream_chunk"
+        ]
+        self.assertEqual(3, len(chunk_lines))
+        for line in chunk_lines:
+            self.assertEqual("a" * 32, line["trace_id"])
+
+    def test_reset_does_not_leak_into_a_later_request(self):
+        self._wsgi_get("/stream/", _TRACE_A)
+        self._wsgi_get("/sync/", _TRACE_B)
+        lines = [
+            line
+            for line in self._lines()
+            if line.get("event_name") == "matrix.sync_view"
+        ]
+        self.assertEqual(1, len(lines))
+        self.assertEqual("b" * 32, lines[0]["trace_id"])
+
+
+@unittest.skipIf(django is None, "django is not installed in this environment")
+class DjangoMiddlewareAsyncStreamingTests(_DjangoMiddlewareTestCase):
+    """The async half of HTM-013: an async-iterable streaming body keeps
+    the same context-preservation guarantee. Skips entirely on Django's
+    oldest supported row (3.2.9), which has no `__aiter__` on
+    `StreamingHttpResponse` at all. No `Proves:` line yet: waits for
+    STANDARDS.md's own HTM-013 entry (phase 5)."""
+
+    middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
+    service_name = "django-async-streaming"
+
+    def test_asgi_async_streaming_body_keeps_context_bound_per_chunk(self):
+        from django.http import StreamingHttpResponse
+
+        if not hasattr(StreamingHttpResponse, "__aiter__"):
+            self.skipTest(
+                "StreamingHttpResponse has no __aiter__ on this Django version"
+            )
+        status, body = self._asgi_get("/astream/", _TRACE_A)
+        self.assertEqual(200, status)
+        self.assertEqual(b"chunk-0chunk-1chunk-2", body)
+        lines = self._lines()
+        chunk_lines = [
+            line for line in lines if line.get("event_name") == "matrix.astream_chunk"
+        ]
+        self.assertEqual(3, len(chunk_lines))
+        for line in chunk_lines:
+            self.assertEqual("a" * 32, line["trace_id"])
+
+
+@unittest.skipIf(django is None, "django is not installed in this environment")
+class DjangoMiddlewareFileResponseTests(_DjangoMiddlewareTestCase):
+    """`FileResponse.file_to_stream` survives untouched (sendfile intact):
+    the rebind carve-out leaves a `FileResponse` alone entirely, and a
+    direct assertion confirms rebinding WOULD null it if attempted
+    (design D5). No `Proves:` line yet: waits for STANDARDS.md's own
+    HTM-013 entry (phase 5)."""
+
+    middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
+    service_name = "django-file-response"
+
+    def test_file_response_is_not_rebound_and_content_survives(self):
+        status, body = self._wsgi_get("/file/")
+        self.assertEqual("200 OK", status)
+        self.assertEqual(b"file-body-bytes", body)
+
+    def test_wsgi_file_wrapper_sendfile_path_reaches_the_wsgi_server(self):
+        # The real proof the carve-out exists for: Django's own WSGIHandler
+        # only substitutes environ["wsgi.file_wrapper"] for the response
+        # when response.file_to_stream is still set (wsgi.py). If the
+        # carve-out is ever removed, the rebind nulls file_to_stream
+        # (design D5) before WSGIHandler makes that check, so the WSGI
+        # server never sees the file wrapper at all -- asserting on the
+        # returned iterable's own type is the only way to observe that.
+        class _RecordingFileWrapper:
+            def __init__(self, filelike, blksize=8192):
+                self.filelike = filelike
+                self.blksize = blksize
+
+        env = environ(
+            PATH_INFO="/file/", **{"wsgi.file_wrapper": _RecordingFileWrapper}
+        )
+        result = self._wsgi_app()(env, recording_start_response())
+        self.assertIsInstance(
+            result,
+            _RecordingFileWrapper,
+            "FileResponse must reach WSGIHandler's own file_wrapper path unrebound",
+        )
+
+    def test_rebinding_streaming_content_would_null_file_to_stream(self):
+        # A direct assertion of the hazard the carve-out avoids: proves
+        # the carve-out is load-bearing, not incidental.
+        import tempfile
+
+        from django.http import FileResponse
+
+        with tempfile.NamedTemporaryFile(suffix=".bin") as handle:
+            handle.write(b"probe-bytes")
+            handle.flush()
+            handle.seek(0)
+            response = FileResponse(open(handle.name, "rb"))  # noqa: SIM115
+            self.assertIsNotNone(response.file_to_stream)
+            response.streaming_content = (chunk for chunk in response.streaming_content)
+            self.assertIsNone(response.file_to_stream)
+            response.close()
+
+
 if __name__ == "__main__":
     unittest.main()

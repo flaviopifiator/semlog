@@ -214,6 +214,34 @@ class ASGIMiddleware:
             pop(token)
 
 
+def _stream_in_scope(iterable, snapshot, on_complete):
+    """Rebind target for a synchronous `StreamingHttpResponse` body
+    (HTM-013): re-pushes `snapshot` at the first `next()`, not at
+    creation (design D4) -- a generator never started never runs its
+    `finally`, so a token held by the caller would leak; re-pushing here
+    leaks nothing when never started. `on_complete` runs the request
+    event, when enabled, before the final reset."""
+    token = push(snapshot)
+    try:
+        yield from iterable
+    finally:
+        on_complete()
+        pop(token)
+
+
+async def _astream_in_scope(aiterable, snapshot, on_complete):
+    """Async mirror of `_stream_in_scope` (HTM-013's async half); absent
+    on Django's own oldest supported row, which has no `__aiter__` at all
+    on `StreamingHttpResponse`."""
+    token = push(snapshot)
+    try:
+        async for chunk in aiterable:
+            yield chunk
+    finally:
+        on_complete()
+        pop(token)
+
+
 class DjangoMiddleware:
     """Django `settings.MIDDLEWARE` entry serving both synchronous and
     asynchronous deployments through exactly one class (HTM-008), shaped
@@ -278,14 +306,10 @@ class DjangoMiddleware:
         start = time.perf_counter_ns() if self._log_requests else None
         try:
             response = self.get_response(request)
-            # Emit while OUR OWN snapshot is still bound, not after
-            # popping (matches WSGIMiddleware/ASGIMiddleware precedent):
-            # popping first would make the event read whatever context was
-            # current before this middleware ran instead of its own.
-            self._emit_completion_event(request, response, start)
-        finally:
+        except BaseException:
             pop(token)
-        return response
+            raise
+        return self._finish(request, response, snapshot, token, start)
 
     async def __acall__(self, request):
         if _modes.is_off():
@@ -297,13 +321,13 @@ class DjangoMiddleware:
         start = time.perf_counter_ns() if self._log_requests else None
         try:
             response = await self.get_response(request)
-            # Synchronous post-processing of the response, on the loop
-            # thread (design D1): no `sync_to_async` hop occurred, so
-            # reading a plain attribute here never raises.
-            self._emit_completion_event(request, response, start)
-        finally:
+        except BaseException:
             pop(token)
-        return response
+            raise
+        # Synchronous post-processing of the response, on the loop thread
+        # (design D1): no `sync_to_async` hop occurred, so reading a plain
+        # attribute here never raises.
+        return self._finish(request, response, snapshot, token, start)
 
     def process_exception(self, request, exception):
         """HTM-011: stash the exception without swallowing it, and always
@@ -319,20 +343,44 @@ class DjangoMiddleware:
         )
         return
 
-    def _emit_completion_event(self, request, response, start):
-        """HTM-007/HTM-011: read then clear whatever `process_exception`
-        stashed on `request`, regardless of `log_requests`, so no
-        internal attribute survives on the request object; emit the
-        optional completion event only when enabled, applying
-        `_emit_request_event`'s existing INFO/ERROR selection against the
-        real final `status_code`."""
+    def _finish(self, request, response, snapshot, token, start):
+        """HTM-007/HTM-011/HTM-013 shared tail for both `__call__`/
+        `__acall__`: read then clear whatever `process_exception` stashed
+        on `request`, then either rebind a streaming body's
+        `streaming_content` (design D4: re-pushes its own copy of
+        `snapshot` at first consumption, deferring both `pop` and the
+        completion event into the generator's own `finally`) or emit the
+        optional completion event and pop immediately, while `snapshot`
+        is still the bound context (not after -- see `DjangoMiddleware
+        Coexistence` precedent in the exception-capture commit)."""
         exc_info = request.__dict__.pop("_semlog_exc_info", None)
-        if not self._log_requests:
-            return
-        _emit_request_event(
-            request.method,
-            request.path,
-            response.status_code,
-            time.perf_counter_ns() - start,
-            exc_info,
-        )
+
+        def on_complete():
+            if self._log_requests:
+                _emit_request_event(
+                    request.method,
+                    request.path,
+                    response.status_code,
+                    time.perf_counter_ns() - start,
+                    exc_info,
+                )
+
+        streaming = getattr(response, "streaming", False)
+        file_to_stream = getattr(response, "file_to_stream", None)
+        if streaming and file_to_stream is None:
+            body = response.streaming_content
+            wrap = (
+                _astream_in_scope
+                if getattr(response, "is_async", False)
+                else _stream_in_scope
+            )
+            response.streaming_content = wrap(body, snapshot, on_complete)
+            pop(token)
+            return response
+        # A `FileResponse` (`file_to_stream is not None`) is left alone
+        # entirely (design D5): rebinding `streaming_content` there sets
+        # `file_to_stream` back to `None`, disabling the `wsgi.file_
+        # wrapper` sendfile path.
+        on_complete()
+        pop(token)
+        return response
