@@ -9,7 +9,7 @@
 
 # semlog
 
-**Registro estructurado en JSON sobre `logging` de la biblioteca estándar de Python: un contrato de registro estable y respaldado por un esquema, con nombres de campo de OpenTelemetry, W3C Trace Context y cero dependencias.**
+**Registro estructurado en JSON sobre `logging` de la biblioteca estándar de Python, con nombres de campo de OpenTelemetry y W3C Trace Context.**
 
 [![CI](https://github.com/flaviopifiator/semlog/actions/workflows/ci.yml/badge.svg)](https://github.com/flaviopifiator/semlog/actions/workflows/ci.yml)
 [![Python 3.10-3.14](https://img.shields.io/badge/python-3.10--3.14-3776AB?logo=python&logoColor=white)](.github/workflows/ci.yml)
@@ -22,13 +22,20 @@
 
 ## Por qué semlog
 
-El código de la aplicación sigue usando `logging.getLogger(__name__)`; semlog define la forma de cada registro y convierte esa forma en un contrato.
+El código de la aplicación sigue llamando a `logging.getLogger(__name__)`. semlog define la forma de cada registro y convierte esa forma en un contrato.
+
+Dos propiedades deciden si encaja en un servicio determinado:
+
+- **Entra en un servicio que ya está en ejecución.** En [modo `hybrid`](#modos), cada línea que el servicio imprime hoy sigue imprimiéndose de forma idéntica byte a byte. Una llamada marcada con `semlog=True` queda oculta de esa salida impresa y se convierte en un registro JSON. No hace falta reescribir antes ninguna línea de registro existente. `SEMLOG_MODE=off` devuelve el proceso a su comportamiento anterior en el siguiente arranque, sin cambios de código.
+- **Cero dependencias de tiempo de ejecución.** semlog está construido solo sobre la biblioteca estándar, y su rueda no declara ninguna entrada `Requires-Dist`. Eso importa donde cada dependencia nueva debe revisarse antes de llegar a producción.
+
+Lo que aporta el contrato en sí:
 
 - **Un contrato JSON estable.** El orden de los campos, sus tipos y las reglas de `null` están especificados en [STANDARDS.md](STANDARDS.md) y publicados como JSON Schema ([`schemas/log-record.schema.json`](schemas/log-record.schema.json)). Eliminar o renombrar un campo es un cambio de versión mayor.
-- **Nombres de campo de OpenTelemetry.** `severity_text`, `severity_number`, `trace_id`, `span_id`, `service.*` y `telemetry.sdk.*` siguen el modelo de datos de logs de OpenTelemetry, con las convenciones semánticas fijadas en la versión v1.44.0.
+- **Nombres de campo de OpenTelemetry.** `severity_text`, `severity_number`, `trace_id`, `span_id`, `service.*` y `telemetry.sdk.*` siguen el modelo de datos de logs de OpenTelemetry, con las Semantic Conventions fijadas en la versión v1.44.0.
 - **W3C Trace Context integrado.** Los middlewares WSGI y ASGI leen `traceparent`, `tracestate` y el `baggage` permitido, e `inject()` los propaga en las llamadas salientes. No se necesita ningún SDK de trazas.
-- **Cero dependencias de tiempo de ejecución.** semlog está construido íntegramente sobre la biblioteca estándar. Los loggers de terceros que propagan hacia el logger raíz pasan por la misma tubería, y `capture_loggers` cubre los que instalan sus propios manejadores.
-- **Trazabilidad de requisitos.** Cada requisito normativo de STANDARDS.md tiene un identificador y al menos una prueba que lo cita; la suite de pruebas falla cuando un requisito no tiene ninguna prueba que lo cite.
+- **Una sola tubería para todos los loggers.** Los loggers de terceros que propagan hacia el logger raíz pasan por la misma tubería, y `capture_loggers` cubre los que instalan sus propios manejadores.
+- **Trazabilidad de requisitos.** Cada requisito normativo de STANDARDS.md tiene un identificador y al menos una prueba que lo cita. La suite falla cuando un requisito no tiene ninguna prueba que lo cite.
 
 ## Instalación
 
@@ -49,6 +56,12 @@ O para instalarlo en un entorno:
 ```bash
 uv pip install semlog
 ```
+
+## Qué significa el nombre
+
+`semlog` es `semantic` más `log`, por las Semantic Conventions de OpenTelemetry: la especificación que fija cómo se llama cada campo de telemetría y qué significa. semlog aplica esos nombres a los registros, de modo que `service.name`, `trace_id` y `url.path` significan lo mismo en todos los servicios que los emiten.
+
+Esa es la diferencia con el texto libre del mensaje. Un campo con un nombre y un significado estables se puede consultar, agregar y usar en alertas entre servicios, sin escribir una regla de parseo por servicio.
 
 ## Guía rápida
 
@@ -259,7 +272,7 @@ Por defecto `False`, se lee una sola vez, cuando Django construye el middleware.
 
 `mode` selecciona cuánto de semlog está activo en un proceso: `"full"` (el valor por defecto, y la opción correcta para un servicio nuevo), `"hybrid"` y `"off"`.
 
-Para un servicio que ya está en producción, con sus propias líneas de registro existentes, `hybrid` es la vía de adopción: cada línea que el servicio ya imprime sigue imprimiéndose de forma idéntica byte a byte, y una llamada escrita con la palabra clave `semlog=True` queda oculta de esa misma salida impresa y se convierte, en su lugar, en un registro JSON. `logger.info("event.name", extra={...}, semlog=True)` es la forma de una llamada que adopta semlog de esta manera. `off` se comporta como si semlog nunca se hubiera instalado, salvo que la propia palabra clave nunca lanza una excepción, de modo que resulta seguro dejarla en los puntos de llamada durante una reversión. `full` es el estado final, y el valor por defecto para un servicio nuevo que no tiene líneas de registro existentes que preservar: la vía de adopción es `hybrid`, y luego `full` una vez revisada su salida. `mode` se cambia por entorno, sin necesidad de modificar código.
+Para un servicio que ya está en producción, con sus propias líneas de registro existentes, `hybrid` es la vía de adopción. Cada línea que el servicio ya imprime sigue imprimiéndose de forma idéntica byte a byte. Una llamada escrita con la palabra clave `semlog=True` queda oculta de esa misma salida impresa y se convierte en un registro JSON; `logger.info("event.name", extra={...}, semlog=True)` es la forma de una llamada así. `off` se comporta como si semlog nunca se hubiera instalado, salvo que la propia palabra clave nunca lanza una excepción, de modo que resulta seguro dejarla en los puntos de llamada durante una reversión. `full` es el estado final, y el valor por defecto para un servicio nuevo sin líneas de registro existentes que preservar: la vía de adopción es `hybrid`, y luego `full` una vez revisada su salida. `mode` se cambia por entorno, sin modificar código.
 
 - **`full`**: cada llamada de registro pasa por la tubería de semlog y se convierte en un registro JSON por línea, exactamente como se muestra en [Salida](#salida).
 - **`hybrid`**: `configure()` nunca toca los manejadores ni el nivel existentes del logger raíz. Una llamada hecha con `semlog=True` queda oculta de todo `StreamHandler` y se emite, en su lugar, como un registro JSON de semlog; cualquier otra llamada sigue imprimiéndose exactamente igual que antes de instalar semlog. Ver [Limitaciones](#limitaciones) para el alcance exacto de esta supresión.
@@ -279,7 +292,7 @@ Para un servicio que ya está en producción, con sus propias líneas de registr
 mode = "hybrid"
 ```
 
-Leer `pyproject.toml` necesita `tomllib` de la biblioteca estándar, disponible desde Python 3.11 en adelante; en Python 3.10 esta fuente se omite por completo, y la resolución continúa con la siguiente. El archivo se busca a partir del directorio de trabajo actual (o de `configure(search_dir=...)`, si se indica) y hacia arriba por sus directorios padres; una imagen de contenedor construida sin el árbol de fuentes del proyecto presente, o sin el directorio de trabajo apuntando a él, con frecuencia no tiene ningún `pyproject.toml` que encontrar, en cuyo caso esta fuente se omite en silencio, igual que en Python 3.10. Una `SEMLOG_MODE` vacía se trata como ausente, igual que si no estuviera definida, y la resolución continúa con la siguiente fuente; esto no aplica a `[tool.semlog].mode`, donde una cadena vacía es un valor declarado real. Un valor presente pero fuera de `"full"`, `"hybrid"`, `"off"`, proveniente de cualquiera de las tres fuentes, lanza `ValueError` nombrando tanto el valor inválido como la fuente de la que proviene.
+Leer `pyproject.toml` necesita `tomllib` de la biblioteca estándar, disponible desde Python 3.11 en adelante. En Python 3.10 esta fuente se omite por completo, y la resolución continúa con la siguiente. El archivo se busca a partir del directorio de trabajo actual (o de `configure(search_dir=...)`, si se indica) y hacia arriba por sus directorios padres. Una imagen de contenedor construida sin el árbol de fuentes del proyecto, o con su directorio de trabajo apuntando a otro lugar, con frecuencia no tiene ningún `pyproject.toml` que encontrar; esa fuente se omite entonces en silencio, igual que en Python 3.10. Una `SEMLOG_MODE` vacía cuenta como ausente y la resolución continúa con la siguiente fuente. `[tool.semlog].mode` es distinto: ahí una cadena vacía es un valor declarado real. Un valor fuera de `"full"`, `"hybrid"` y `"off"`, proveniente de cualquiera de las tres fuentes, lanza `ValueError` nombrando tanto el valor inválido como la fuente de la que proviene.
 
 ### Limitaciones
 
@@ -320,7 +333,7 @@ Las claves son cadenas planas con puntos. Los campos de traza aparecen solo cuan
 
 ## Compatibilidad
 
-La suite de pruebas se ejecuta en integración continua sobre CPython 3.10, 3.11, 3.12, 3.13 y 3.14; la versión 3.15 también se ejecuta y se permite que falle. El paquete es Python puro (rueda `py3-none-any`). La integración con frameworks se prueba en integración continua contra estas versiones:
+La suite de pruebas se ejecuta en integración continua sobre CPython 3.10, 3.11, 3.12, 3.13 y 3.14; la versión 3.15 también se ejecuta y se permite que falle. El paquete es Python puro (rueda `py3-none-any`). Incluye un marcador `py.typed` (PEP 561), de modo que un verificador de tipos lee las anotaciones que el paquete trae, en lugar de tratarlo como no tipado. La integración con frameworks se prueba en integración continua contra estas versiones:
 
 | Framework | Versión | Python | Rol |
 |---|---|---|---|

@@ -9,7 +9,7 @@
 
 # semlog
 
-**Structured JSON logging for Python's standard `logging`: a stable, schema-backed record contract with OpenTelemetry field names, W3C Trace Context and zero dependencies.**
+**Structured JSON logging for Python's standard `logging`, with OpenTelemetry field names and W3C Trace Context.**
 
 [![CI](https://github.com/flaviopifiator/semlog/actions/workflows/ci.yml/badge.svg)](https://github.com/flaviopifiator/semlog/actions/workflows/ci.yml)
 [![Python 3.10-3.14](https://img.shields.io/badge/python-3.10--3.14-3776AB?logo=python&logoColor=white)](.github/workflows/ci.yml)
@@ -22,13 +22,20 @@
 
 ## Why semlog
 
-Application code keeps using `logging.getLogger(__name__)`; semlog decides what every record looks like and makes that shape a contract.
+Application code keeps calling `logging.getLogger(__name__)`. semlog decides what every record looks like, and makes that shape a contract.
+
+Two properties decide whether it fits a given service:
+
+- **It goes into a service that is already running.** In [`hybrid` mode](#modes), every line the service prints today keeps printing byte-identically. A call marked `semlog=True` is hidden from that printed output and becomes one JSON record instead. No existing log line has to be rewritten first. `SEMLOG_MODE=off` returns the process to its previous behavior at its next start, with no code change.
+- **Zero runtime dependencies.** semlog is built on the standard library alone, and its wheel declares no `Requires-Dist` entries. That matters where every new dependency has to be reviewed before it ships.
+
+What the contract itself gives you:
 
 - **A stable JSON contract.** Field order, types and `null` rules are specified in [STANDARDS.md](STANDARDS.md) and published as a JSON Schema ([`schemas/log-record.schema.json`](schemas/log-record.schema.json)). Removing or renaming a field is a major version change.
 - **OpenTelemetry field names.** `severity_text`, `severity_number`, `trace_id`, `span_id`, `service.*` and `telemetry.sdk.*` follow the OpenTelemetry Logs Data Model, with Semantic Conventions pinned to v1.44.0.
 - **W3C Trace Context built in.** The WSGI and ASGI middlewares read `traceparent`, `tracestate` and allowlisted `baggage`, and `inject()` propagates them on outbound calls. No tracing SDK is needed.
-- **Zero runtime dependencies.** semlog is built entirely on the standard library. Third-party loggers that propagate to the root logger go through the same pipeline, and `capture_loggers` covers the ones that install their own handlers.
-- **Requirement traceability.** Every normative requirement in STANDARDS.md has an ID and at least one test that cites it; the test suite fails when a requirement has no citing test.
+- **One pipeline for every logger.** Third-party loggers that propagate to the root logger go through the same pipeline, and `capture_loggers` covers the ones that install their own handlers.
+- **Requirement traceability.** Every normative requirement in STANDARDS.md has an ID and at least one test that cites it. The suite fails when a requirement has no citing test.
 
 ## Installation
 
@@ -49,6 +56,12 @@ Or install it into an environment:
 ```bash
 uv pip install semlog
 ```
+
+## What the name means
+
+`semlog` is `semantic` plus `log`, after OpenTelemetry's Semantic Conventions: the specification that fixes what each telemetry field is called and what it means. semlog applies those names to log records, so `service.name`, `trace_id` and `url.path` mean the same thing in every service that emits them.
+
+That is the difference from free-form message text. A field with a stable name and a stable meaning can be queried, aggregated and alerted on across services, with no parsing rule written per service.
 
 ## Quick start
 
@@ -259,7 +272,7 @@ Default `False`, read once, when Django constructs the middleware. A non-boolean
 
 `mode` selects how much of semlog is active in a process: `"full"` (the default, and the right choice for a new service), `"hybrid"`, and `"off"`.
 
-For a service already running in production, with its own existing log lines, `hybrid` is the adoption path: every line the service already prints keeps printing byte-identically, and a call written with the `semlog=True` keyword is hidden from that same printed output and instead becomes one JSON record. `logger.info("event.name", extra={...}, semlog=True)` is the shape of a call that adopts semlog this way. `off` behaves as if semlog were never installed at all, except that the keyword itself never raises, so it stays safe to leave in call sites while rolling back. `full` is the end state, and the default for a new service that has no existing log lines to preserve: the adoption path is `hybrid`, then `full` once its output has been reviewed. `mode` is switched by environment, with no code change required.
+For a service already running in production, with its own existing log lines, `hybrid` is the adoption path. Every line the service already prints keeps printing byte-identically. A call written with the `semlog=True` keyword is hidden from that same printed output and becomes one JSON record instead; `logger.info("event.name", extra={...}, semlog=True)` is the shape of such a call. `off` behaves as if semlog were never installed, except that the keyword itself never raises, so it stays safe to leave in call sites while rolling back. `full` is the end state, and the default for a new service with no existing log lines to preserve: the adoption path is `hybrid`, then `full` once its output has been reviewed. `mode` is switched by environment, with no code change.
 
 - **`full`**: every log call goes through semlog's pipeline and becomes one JSON record per line, exactly as shown in [Output](#output).
 - **`hybrid`**: `configure()` never touches the root logger's existing handlers or level. A call made with `semlog=True` is hidden from every `StreamHandler` and instead emitted as one semlog JSON record; every other call keeps printing exactly as it did before semlog was installed. See [Limitations](#limitations) for the exact scope of this suppression.
@@ -279,7 +292,7 @@ For a service already running in production, with its own existing log lines, `h
 mode = "hybrid"
 ```
 
-Reading `pyproject.toml` needs the standard library's `tomllib`, available on Python 3.11 and later; on Python 3.10 this source is skipped entirely, and resolution falls through to the next one. The file is searched starting from the current working directory (or `configure(search_dir=...)`, when given) and upward through its parent directories; a container image built without the project's source tree present, or without the working directory set to it, often has no `pyproject.toml` to find, in which case this source is silently skipped, the same as on Python 3.10. An empty `SEMLOG_MODE` is treated as absent, the same as leaving it unset, and falls through to the next source; this does not apply to `[tool.semlog].mode`, where an empty string is a real declared value. A value that is present but outside `"full"`, `"hybrid"`, `"off"`, from any of the three sources, raises `ValueError` naming both the invalid value and the source it came from.
+Reading `pyproject.toml` needs the standard library's `tomllib`, available on Python 3.11 and later. On Python 3.10 this source is skipped entirely, and resolution falls through to the next one. The file is searched from the current working directory (or `configure(search_dir=...)`, when given) and upward through its parent directories. A container image built without the project's source tree, or with its working directory set elsewhere, often has no `pyproject.toml` to find; that source is then skipped silently, the same as on Python 3.10. An empty `SEMLOG_MODE` counts as absent and falls through to the next source. `[tool.semlog].mode` is different: there, an empty string is a real declared value. A value outside `"full"`, `"hybrid"` and `"off"`, from any of the three sources, raises `ValueError` naming both the invalid value and the source it came from.
 
 ### Limitations
 
@@ -320,7 +333,7 @@ Keys are flat, dotted strings. Trace fields appear only when a trace context is 
 
 ## Compatibility
 
-The test suite runs in CI on CPython 3.10, 3.11, 3.12, 3.13 and 3.14; 3.15 also runs there and is allowed to fail. The package is pure Python (`py3-none-any` wheel). Framework integration is tested in CI against these versions:
+The test suite runs in CI on CPython 3.10, 3.11, 3.12, 3.13 and 3.14; 3.15 also runs there and is allowed to fail. The package is pure Python (`py3-none-any` wheel). It ships a PEP 561 `py.typed` marker, so a type checker reads the annotations the package carries instead of treating it as untyped. Framework integration is tested in CI against these versions:
 
 | Framework | Version | Python | Role |
 |---|---|---|---|

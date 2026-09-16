@@ -2,6 +2,10 @@
 
 > A structured logging library for Python, built entirely on the standard library's `logging` module, aligned with the OpenTelemetry Logs Data Model and W3C Trace Context, with zero runtime dependencies.
 
+The name is `semantic` plus `log`: semlog applies the field names of OpenTelemetry's Semantic Conventions to log records, so every field carries a stable meaning instead of free-form text.
+
+A service that is already running adopts it in `hybrid` mode, without rewriting any existing log line, and `SEMLOG_MODE=off` returns that process to its previous behavior at its next start.
+
 Run `python -m semlog llm` (or call `semlog.llm()` from the installed package) for the agent guide matching your installed version.
 
 ## Docs

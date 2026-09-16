@@ -20,6 +20,10 @@ READMES = {
     "en": {
         "path": REPO_ROOT / "README.md",
         "switch": "**English** | [Español](README.es.md)",
+        "why": "Why semlog",
+        "installation": "Installation",
+        "name": "What the name means",
+        "quick_start": "Quick start",
         "configuration": "Configuration",
         "documentation": "Documentation",
         "performance": "Performance",
@@ -31,6 +35,10 @@ READMES = {
     "es": {
         "path": REPO_ROOT / "README.es.md",
         "switch": "[English](README.md) | **Español**",
+        "why": "Por qué semlog",
+        "installation": "Instalación",
+        "name": "Qué significa el nombre",
+        "quick_start": "Guía rápida",
         "configuration": "Configuración",
         "documentation": "Documentación",
         "performance": "Rendimiento",

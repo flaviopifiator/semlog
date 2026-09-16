@@ -4,9 +4,11 @@
 
 This guide is the single, self-sufficient source for writing correct call sites against semlog, offline, with no network access. It is shipped inside the installed package as package data, so it always matches the installed library version. `llms.txt` and `AGENTS.md` link to it instead of duplicating its content; if you already have this file, you do not need either of those.
 
+The name is `semantic` plus `log`: semlog applies the field names of OpenTelemetry's Semantic Conventions to log records, so every field carries a stable meaning instead of free-form text. That is what the call-site rules below protect: a static event name and typed fields in `extra` keep a record queryable, while an interpolated message does not.
+
 ## Public API
 
-semlog exposes exactly nine public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods.
+semlog exposes exactly nine public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods. The package ships a PEP 561 `py.typed` marker, so a type checker reads the annotations it carries instead of treating the package as untyped; the signatures below are the authoritative ones.
 
 ### configure
 
