@@ -84,6 +84,66 @@ class ChangelogTests(unittest.TestCase):
         self.assertEqual([], malformed)
 
 
+def _changelog_section(text, heading_prefix):
+    """The lines of the first `## `-heading section whose text starts with
+    `heading_prefix`, up to (not including) the next `## ` heading."""
+    lines = text.splitlines()
+    start = next(
+        (i for i, line in enumerate(lines) if line.startswith(heading_prefix)), None
+    )
+    assert start is not None, f"no heading starting with {heading_prefix!r}"
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("## "):
+            end = i
+            break
+    return "\n".join(lines[start:end])
+
+
+def _subsection(section_text, title):
+    """The body of the `### {title}` subsection inside `section_text`, up
+    to the next `##`/`###` heading, or `None` when the subsection is
+    absent."""
+    lines = section_text.splitlines()
+    start = next((i for i, line in enumerate(lines) if line.strip() == title), None)
+    if start is None:
+        return None
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].startswith("### ") or lines[i].startswith("## "):
+            end = i
+            break
+    return "\n".join(lines[start + 1 : end]).strip()
+
+
+class Changelog020Tests(unittest.TestCase):
+    """Proves: DOC-013
+
+    CHANGELOG.md's `## [0.2.0]` section: a dated heading, a non-empty
+    `### Added` subsection naming the modes and the `semlog=True` keyword,
+    and a non-empty `### Fixed` subsection."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        cls.section = _changelog_section(cls.text, "## [0.2.0]")
+
+    def test_changelog_has_a_dated_0_2_0_heading(self):
+        self.assertRegex(self.text, r"(?m)^## \[0\.2\.0\] - \d{4}-\d{2}-\d{2}$")
+
+    def test_0_2_0_has_a_non_empty_added_subsection_naming_modes_and_keyword(self):
+        added = _subsection(self.section, "### Added")
+        self.assertIsNotNone(added, "no ### Added subsection")
+        self.assertTrue(added)
+        self.assertIn("mode", added.lower())
+        self.assertIn("semlog=True", added)
+
+    def test_0_2_0_has_a_non_empty_fixed_subsection(self):
+        fixed = _subsection(self.section, "### Fixed")
+        self.assertIsNotNone(fixed, "no ### Fixed subsection")
+        self.assertTrue(fixed)
+
+
 class ConventionalCommitsDocumentedTests(unittest.TestCase):
     """Proves: CP-004"""
 

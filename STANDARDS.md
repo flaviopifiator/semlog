@@ -419,7 +419,7 @@ The upper version bound follows the recommendation of the `uv` documentation. It
 
 > **Design decision (DOC-012).** Rationale: extends DOC-002's existing README parity policy to this change's new user-facing surface, so the two languages and the agent-facing files never diverge on how to adopt or roll back the feature. Rejected alternative: leaving mode/keyword documentation solely to STANDARDS.md and the agent guide, which would leave human adopters reading only README.md without any parity guarantee and risk README.md and README.es.md diverging silently.
 
-(DOC-013, covering the CHANGELOG.md `## [0.2.0]` section, is declared together with its citing test and that section's actual content in the CHANGELOG work unit, so TRC-003 always has a real test to point to.)
+**DOC-013**: CHANGELOG.md MUST include a `## [0.2.0]` section, in Keep a Changelog format ([KEEPACHANGELOG], CP-004), with a non-empty `### Added` subsection covering the three modes and the `semlog=True` keyword, and a non-empty `### Fixed` subsection covering the writer stream-resolution and dead-writer-detection fixes (LP-006, LP-011). Test: `tests/test_packaging_hygiene.py::Changelog020Tests`.
 
 ### 11.3 Python support
 
@@ -605,6 +605,7 @@ The specification's requirement identifiers, with the section of this document t
 | DOC-010 | 11.2 | External: [AGENTSMD] | 1.12, 4.19 |
 | DOC-011 | 11.2 | External: [AGENTSMD], [LLMSTXT] | 1.10, 3.15, 3.16, 4.16, 4.18, 4.20, 4.21, 4.22, 4.23 |
 | DOC-012 | 11.2 | Design decision | `tests/test_readme_i18n.py::ReadmeModesParityTests` |
+| DOC-013 | 11.2 | External: [KEEPACHANGELOG] | `tests/test_packaging_hygiene.py::Changelog020Tests` |
 | CP-001 | 11 | External: [PYVERSIONS], [SPEC0] | 4.1, 4.16 |
 | CP-002 | 11 | External: [FASTAPI-RELEASES], [DJANGO-3.2.9], [PYVERSIONS] | 4.10, 4.11, 4.12, 4.13 |
 | CP-003 | 10 | External: [PEP621], [PEP517], [PEP518] | 4.3, 4.4 |

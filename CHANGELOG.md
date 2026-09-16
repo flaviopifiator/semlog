@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-15
+
+### Added
+
+- Three execution modes, selected through `configure(mode=...)`: `full`
+  (the default and the end state for a new service), `hybrid` (the
+  adoption path for a service already running in production: every
+  existing log line keeps printing byte-identically, while a call written
+  as `logger.info("event.name", extra={...}, semlog=True)` additionally
+  becomes one JSON record), and `off` (behaves as if semlog were never
+  installed, except that the keyword itself never raises). `mode`
+  resolves from the `mode` parameter, then the `SEMLOG_MODE` environment
+  variable, then `[tool.semlog].mode` in `pyproject.toml` (Python 3.11 and
+  later only), then the `"full"` default; an invalid value from any
+  source raises `ValueError` naming the value and its source.
+- The `semlog=True` call-site keyword, accepted by every `logging.Logger`
+  method (`debug`, `info`, `warning`, `error`, `critical`, `exception`,
+  `log`) in every mode, including before `configure()` runs, without ever
+  raising and without mutating the caller's `extra` dict.
+
+### Fixed
+
+- The writer thread and the direct/synchronous emission path now resolve
+  the output stream robustly: a replaced `sys.stdout` lacking a `.buffer`
+  attribute no longer kills the writer thread or terminates the process.
+- `flush(timeout=None)` now detects a dead or never-started writer thread
+  and returns promptly instead of waiting out the full timeout for a
+  marker that could never be processed.
+- A `queue.Full` escaping the at-fork hook's writer shutdown no longer
+  leaves a second writer thread running in the forking process; a
+  leftover second writer previously deadlocked a later fork waiting on a
+  sentinel the wrong writer would consume.
+
 ## [0.1.0] - 2026-09-14
 
 ### Added
