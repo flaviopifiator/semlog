@@ -56,7 +56,7 @@ Only a line that starts with the bold identifier followed by a colon and a space
 
 > **Design decision (TRC-002).** Rationale: traceability is verified in both directions, from requirement to test and from test to requirement. Rejected alternative: a hand-maintained traceability matrix, which goes stale over time.
 
-**TRC-003**: A continuous integration check, implemented using only the Python standard library, MUST run on every change and MUST fail when: (a) a requirement identifier declared in STANDARDS.md has no conformance test citing it; (b) a conformance test cites a requirement identifier not declared in STANDARDS.md; (c) a declared requirement has no backing of either of the two types defined by DOC-003. The mechanism for extracting identifiers from STANDARDS.md and from the tests is a design-phase decision; this requirement does not prescribe file names, module names or a specific parsing technique. Test: task 2.1/2.2.
+**TRC-003**: A continuous integration check, implemented using only the Python standard library, MUST run on every change and MUST fail when: (a) a requirement identifier declared in STANDARDS.md has no conformance test citing it; (b) a conformance test cites a requirement identifier not declared in STANDARDS.md; (c) a declared requirement has no backing of either of the two types defined by DOC-003; (d) a requirement's own `Test:` sentence or Annex A "Planned test" cell names a test file or class that does not itself carry a `Proves:` tag for that same identifier -- a NAMED citation pointing nowhere real, distinct from (a)/(b)'s existence-only checks. The mechanism for extracting identifiers from STANDARDS.md and from the tests is a design-phase decision; this requirement does not prescribe file names, module names or a specific parsing technique. Test: task 2.1/2.2; `tests/test_traceability.py::test_every_citation_names_a_real_proving_location`.
 
 > **Design decision (TRC-003).** Rationale: the check is enforced in the normal continuous integration suite, without depending on a manual step. Rejected alternative: manual review of traceability compliance.
 
@@ -663,7 +663,7 @@ The specification's requirement identifiers, with the section of this document t
 | CP-019 | 10 | Design decision | `tests/test_doc_conformance.py::Cp019InternalBenchmarkUntrackedTests` |
 | TRC-001 | 1.1 | Design decision | 2.1, 2.2 |
 | TRC-002 | 1.1 | Design decision | 2.1, 2.2 |
-| TRC-003 | 1.1 | Design decision | 2.1, 2.2 |
+| TRC-003 | 1.1 | Design decision | 2.1, 2.2; `tests/test_traceability.py::test_every_citation_names_a_real_proving_location` |
 | TRC-004 | 1.1 | Design decision | 1.20 |
 | CMA-001 | 9.1 | External: [OWASP-ASVS], [ISO27001], [ISO27002], [NIST-SP800-53R5], [PCIDSS], [CWE-117], [CWE-532], [CWE-778], [OWASP-LOGGING], [OWASP-TOP10] | 4.30 |
 | CMA-002 | 9.1 | Design decision | 4.30 |

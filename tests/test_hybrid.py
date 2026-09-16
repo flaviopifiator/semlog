@@ -58,7 +58,11 @@ def _hybrid_configure(**kwargs):
 
 
 class HybridRoutingTests(unittest.TestCase):
-    """Proves: LM-003"""
+    """Proves: LM-003, LM-004
+
+    `test_marked_record_still_rendered_by_a_handle_override_without_super`
+    below is LM-004's own proof (its own method docstring already named
+    LM-004; only this class-level tag had gone stale)."""
 
     def tearDown(self):
         _reset_state()

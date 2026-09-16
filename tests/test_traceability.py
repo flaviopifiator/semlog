@@ -57,6 +57,12 @@ BACKING_RE = re.compile(
 )
 PROVES_RE = re.compile(r"^Proves: (" + ID_PATTERN + r")(, " + ID_PATTERN + r")*$")
 PROVES_LIKE_RE = re.compile(r"(?i)^proves:")
+# TRC-003(d): the literal "Test: ..." sentence a requirement's own paragraph
+# ends with (never "Planned test:", DOC-001's own different wording, which is
+# deliberately not a citable test and must not match here).
+TEST_SENTENCE_RE = re.compile(r"\bTest: (.+)$")
+TEST_CITATION_RE = re.compile(r"`([^`]+)`")
+TEST_FILE_CITATION_RE = re.compile(r"(tests/[\w./]+\.py)(?:::(\w+))?")
 
 ANNEX_A_HEADER = "| Requirement | Section | Backing | Planned test |"
 ANNEX_B_HEADER = (
@@ -83,12 +89,14 @@ class Standards:
         self.section12_tag_duplicates = []  # tag
         self.citations = {}  # tag -> [line_no, ...] (outside section 12)
         self.annex_a = {}  # id -> backing cell text
+        self.annex_a_test = {}  # id -> "Planned test" cell text
         self.annex_a_duplicates = []  # id
         self.annex_a_header_ok = False
         self.annex_b_header_ok = False
         self.annex_b_ids = set()
         self.rationale = {}  # id -> line_no
         self.malformed_rationale = []  # line_no
+        self.test_citations = {}  # id -> [raw "Test: ..." sentence text, ...]
 
 
 def find_citations(line):
@@ -241,10 +249,11 @@ def parse_standards(text):
         for _line_no, cells in rows:
             if len(cells) != 4:
                 continue
-            req_id, _section, backing, _test = cells
+            req_id, _section, backing, test_cell = cells
             if req_id in doc.annex_a:
                 doc.annex_a_duplicates.append(req_id)
             doc.annex_a[req_id] = backing
+            doc.annex_a_test[req_id] = test_cell
 
     # --- Annex B ---
     annex_b_bounds = _section_bounds(lines, heading_at, "## Annex B", 2)
@@ -256,6 +265,18 @@ def parse_standards(text):
             if len(cells) != 4:
                 continue
             doc.annex_b_ids.update(ID_RE.findall(cells[2]))
+
+    # --- "Test: ..."/"Planned test: ..." sentences, per requirement span
+    # (TRC-003(d) citation-drift check below) ---
+    for req_id, (start, end) in doc.spans.items():
+        texts = []
+        for line_no, line in lines:
+            if not (start <= line_no <= end):
+                continue
+            match = TEST_SENTENCE_RE.search(line)
+            if match:
+                texts.append(match.group(1))
+        doc.test_citations[req_id] = texts
 
     return doc
 
@@ -419,6 +440,55 @@ def find_backing_issues(standards):
     )
 
 
+def _test_file_citations(text):
+    """Yield ``(path, name_or_None)`` for every backtick-quoted test-file
+    citation in ``text`` (a single "Test:" sentence or Annex A "Planned
+    test" cell), resolving STANDARDS.md's own `` `::Class` `` shorthand
+    (reusing the nearest earlier full ``tests/....py`` path in the same
+    text) exactly the way a human reader does. A bare file citation
+    (``name`` is ``None``) means "some test in this file", never a
+    specific class."""
+    last_path = None
+    for raw in TEST_CITATION_RE.findall(text):
+        if raw.startswith("::"):
+            name = raw[2:]
+            if last_path is not None and re.fullmatch(r"\w+", name):
+                yield last_path, name
+            continue
+        match = re.fullmatch(TEST_FILE_CITATION_RE, raw)
+        if not match:
+            continue
+        last_path = match.group(1)
+        yield match.group(1), match.group(2)
+
+
+def find_citation_drift(standards, proves):
+    """Requirement ids whose STANDARDS.md `Test:` sentence or Annex A
+    "Planned test" cell names a test file or class that does not itself
+    carry a `Proves:` tag for that same id (TRC-003(d)) -- the exact blind
+    spot `find_uncovered`/`find_unknown_proves` cannot see: both only
+    check that SOME citation exists and that every `Proves:` id is
+    declared, never that a NAMED citation actually points at a real one."""
+    drift = []
+    for req_id in standards.declarations:
+        locations = set(proves.locations.get(req_id, []))
+        location_paths = {loc.split("::", 1)[0] for loc in locations}
+        texts = list(standards.test_citations.get(req_id, ()))
+        annex_cell = standards.annex_a_test.get(req_id)
+        if annex_cell:
+            texts.append(annex_cell)
+        for text in texts:
+            for path, name in _test_file_citations(text):
+                if name is None:
+                    if path not in location_paths:
+                        drift.append(f"{req_id}: `{path}` carries no Proves: {req_id}")
+                elif f"{path}::{name}" not in locations:
+                    drift.append(
+                        f"{req_id}: `{path}::{name}` carries no Proves: {req_id}"
+                    )
+    return sorted(drift)
+
+
 class StandardsTraceabilityTests(unittest.TestCase):
     """Runs the checker against the real STANDARDS.md and tests/ tree."""
 
@@ -464,6 +534,20 @@ class StandardsTraceabilityTests(unittest.TestCase):
         declared = set(self.standards.declarations)
         uncovered = find_uncovered(declared, self.proves)
         self.assertEqual([], uncovered, "untested: no citing test for")
+
+    def test_every_citation_names_a_real_proving_location(self):
+        """Proves: TRC-003
+
+        TRC-003(d): closes the blind spot `test_every_requirement_proven`
+        and `test_test_citations_well_formed_and_known` structurally
+        cannot see -- both only check that SOME citation/`Proves:` tag
+        exists for an id, never that a NAMED `Test:` sentence or Annex A
+        "Planned test" cell actually points at a file or class that
+        itself carries that id's own `Proves:` tag. Round-2 pre-PR
+        validation (engram #356/#358) found exactly two real instances of
+        this drift by manual cross-check before this test existed."""
+        drift = find_citation_drift(self.standards, self.proves)
+        self.assertEqual([], drift, "citation names no real proving location for")
 
     def test_backing_present_typed_and_consistent(self):
         """Proves: TRC-003, TRC-004, DOC-003"""
@@ -601,6 +685,45 @@ class TraceabilityCheckerFixtureTests(unittest.TestCase):
         ) as root:
             proves = collect_proves(root)
         self.assertIn("FIX-003", proves.cited)
+
+    def test_a_bogus_citation_naming_a_non_proving_class_is_reported(self):
+        """TRC-003(d) non-vacuousness proof: a `Test:` sentence and an
+        Annex A row both naming a class that carries no `Proves:` tag for
+        this id at all (it proves a DIFFERENT id, `FIX-999` -- exactly
+        `HybridRoutingTests`'s and `AgentGuideFrameworkRecipesTests`'s own
+        real shape before their round-2 retag) must be reported by
+        `find_citation_drift`, and a citation that DOES match a real
+        `Proves:` location must not be."""
+        standards = parse_standards(
+            "### 1.1 Identifiers\n\n"
+            "| Prefix | Capability |\n|---|---|\n| FIX | Fixture capability |\n\n"
+            "**FIX-004**: A rule whose citation lies about which class "
+            "proves it. Test: `tests/test_fixture.py::BogusTests`.\n\n"
+            "## 12. Normative and informative references\n\n### Normative\n\n"
+            "## 13. License\n\n"
+            "## Annex A: requirement traceability\n\n"
+            "| Requirement | Section | Backing | Planned test |\n|---|---|---|---|\n"
+            "| FIX-004 | 1.1 | Design decision | "
+            "`tests/test_fixture.py::BogusTests` |\n"
+        )
+        proves = ProvesIndex()
+        proves.cited.add("FIX-004")
+        proves.locations["FIX-004"] = ["tests/test_fixture.py::SomeOtherClass"]
+        drift = find_citation_drift(standards, proves)
+        expected_message = (
+            "FIX-004: `tests/test_fixture.py::BogusTests` carries no Proves: FIX-004"
+        )
+        # Once from the Test: sentence, once from the Annex A cell.
+        self.assertEqual([expected_message, expected_message], drift)
+
+        # Control: retagging the real proving class (matching the actual
+        # round-2 fix for HybridRoutingTests/AgentGuideFrameworkRecipesTests)
+        # clears the drift entirely.
+        proves.locations["FIX-004"] = [
+            "tests/test_fixture.py::SomeOtherClass",
+            "tests/test_fixture.py::BogusTests",
+        ]
+        self.assertEqual([], find_citation_drift(standards, proves))
 
 
 def _minimal_standards():
