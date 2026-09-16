@@ -7,8 +7,13 @@ from __future__ import annotations
 
 import logging
 import unittest
+from unittest import mock
 
+from semlog import _modes
+from semlog._config import configure
 from semlog._context import bind, current, operation
+
+from ._pipeline_support import reset_pipeline
 
 
 class BindMergeSemanticsTests(unittest.TestCase):
@@ -77,6 +82,24 @@ class BindOutOfScopeTests(unittest.TestCase):
                 self.assertEqual({"app.a": 1}, current().attributes)
         finally:
             logger.removeHandler(handler)
+        self.assertEqual([], sentinel)
+
+    def test_even_the_first_out_of_scope_call_is_silent_in_off_mode(self):
+        """Proves: TCP-012"""
+        logger = logging.getLogger("semlog")
+        sentinel = []
+        handler = logging.Handler()
+        handler.emit = lambda record: sentinel.append(record)
+        logger.addHandler(handler)
+        try:
+            with mock.patch.dict("os.environ", {}, clear=True):
+                configure(mode="off", service_name="svc", search_dir=".")
+            bind({"app.a": 1})  # the FIRST out-of-scope call in this process
+        finally:
+            logger.removeHandler(handler)
+            reset_pipeline()
+            _modes.state.mode = "full"
+            _modes.state.marking = False
         self.assertEqual([], sentinel)
 
 

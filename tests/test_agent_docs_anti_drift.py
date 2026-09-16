@@ -441,6 +441,213 @@ class AgentGuideSizeTests(unittest.TestCase):
         self.assertLessEqual(size, _MAX_GUIDE_BYTES, f"{size} bytes")
 
 
+_GUIDE_MODES_SECTION_TITLE = "Execution modes and the semlog=True keyword"
+_GUIDE_MODE_BULLET_MARKERS = ("- **`full`**:", "- **`hybrid`**:", "- **`off`**:")
+_GUIDE_PRECEDENCE_TOKENS = ("configure(", "SEMLOG_MODE", "[tool.semlog]")
+_GUIDE_LIMITATION_MARKERS = (
+    "StreamHandler",
+    "QueueHandler",
+    "QueueListener",
+    "MemoryHandler",
+    "super()",
+)
+_GUIDE_TOML_EXAMPLE = '[tool.semlog]\nmode = "hybrid"'
+_GUIDE_TOML_EXAMPLE_MUTATED = '[tool.semlog_typo]\nmode = "hybrid"'
+_GUIDE_TOMLLIB_CAVEAT_VERSION = "3.11"
+
+
+def _guide_modes_section_text(text):
+    span = _section_span(text, 3, _GUIDE_MODES_SECTION_TITLE)
+    if span is None:
+        return None
+    lines = text.splitlines()
+    return "\n".join(lines[span[0] - 1 : span[1]])
+
+
+def guide_modes_narrative_problems(text=None):
+    """Every way the agent guide's modes/keyword narrative fails to prove
+    DOC-011's full text (empty when it proves everything). Scoped to the
+    "Execution modes and the semlog=True keyword" H3 span, never a
+    whole-file `in` check: `agent_guide.md` has an UNRELATED
+    `StreamHandler` mention in its `configure()` stub's `queue=False`
+    description (validate-wu69 #338, MAJOR M1's own repro), so a
+    whole-file check for that single word alone passes even with this
+    entire subsection deleted. The TOML example and the tomllib version
+    caveat are also checked here (validate-wu69 #339, MINOR n3): a
+    single-file document has no cross-file parity check at all, so an
+    edit to either one here previously went completely undetected."""
+    if text is None:
+        text = _guide_text()
+    section_text = _guide_modes_section_text(text)
+    if section_text is None:
+        return [f"no {_GUIDE_MODES_SECTION_TITLE!r} subsection"]
+
+    problems = []
+    for marker in _GUIDE_MODE_BULLET_MARKERS:
+        if marker not in section_text:
+            problems.append(f"missing mode-explanation bullet {marker!r}")
+
+    positions = [section_text.find(token) for token in _GUIDE_PRECEDENCE_TOKENS]
+    for token, position in zip(_GUIDE_PRECEDENCE_TOKENS, positions):
+        if position == -1:
+            problems.append(f"missing precedence token {token!r}")
+    if all(position != -1 for position in positions) and positions != sorted(positions):
+        problems.append("precedence sequence is out of order")
+
+    if "ValueError" not in section_text:
+        problems.append("missing ValueError")
+
+    if _GUIDE_TOML_EXAMPLE not in section_text:
+        problems.append("TOML example missing or altered")
+
+    if _GUIDE_TOMLLIB_CAVEAT_VERSION not in section_text:
+        problems.append("missing tomllib version caveat")
+
+    for marker in _GUIDE_LIMITATION_MARKERS:
+        if marker not in section_text:
+            problems.append(f"missing limitation marker {marker!r}")
+
+    if "process-start switch" not in section_text:
+        problems.append("missing off-as-process-start-switch phrase")
+
+    if "TypeError" not in section_text:
+        problems.append("missing TypeError")
+
+    return problems
+
+
+class AgentGuideModesTests(unittest.TestCase):
+    """DOC-011's mode/keyword narrative: hybrid's suppression scope with
+    its `StreamHandler`-subclass-override and `QueueHandler`/
+    `QueueListener`/`MemoryHandler` exceptions (LM-004, errata 12,
+    validate-wu69 #338 m2), the three configuration sources and their
+    ORDERED precedence, the `semlog=True` keyword, and `off` as a
+    process-start switch with the uninstall-`TypeError` caveat. Every
+    assertion is scoped to the modes subsection's own span
+    (`guide_modes_narrative_problems`), not a whole-file token check
+    (validate-wu69 #338, MAJOR M1).
+
+    Proves: LM-004, DOC-011
+    """
+
+    def test_guide_proves_the_full_modes_narrative(self):
+        self.assertEqual([], guide_modes_narrative_problems())
+
+    def test_guide_documents_the_semlog_true_keyword_per_mode(self):
+        section_text = _guide_modes_section_text(_guide_text())
+        self.assertIsNotNone(section_text)
+        self.assertIn("semlog=True", section_text)
+
+
+class AgentGuideModesPerturbationTests(unittest.TestCase):
+    """Every check `guide_modes_narrative_problems` performs is
+    demonstrated here to be capable of failing, against deliberately
+    broken in-memory copies of the real guide text (validate-wu69 #338,
+    MAJOR M1's required mutation coverage). The real file is never
+    written to."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = _guide_text()
+
+    def test_baseline_has_no_problems(self):
+        self.assertEqual([], guide_modes_narrative_problems(self.text))
+
+    def test_deleting_the_modes_subsection_entirely_is_caught(self):
+        start = self.text.index(f"### {_GUIDE_MODES_SECTION_TITLE}")
+        end = self.text.index("## FastAPI recipe")
+        mutated = self.text[:start] + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        # The exact vacuousness validate-wu69 #338 found: a whole-file
+        # check for "StreamHandler" alone still passes here, because the
+        # unrelated queue=False mention at the top of the guide survives.
+        self.assertIn("StreamHandler", mutated)
+        self.assertEqual(
+            [f"no {_GUIDE_MODES_SECTION_TITLE!r} subsection"],
+            guide_modes_narrative_problems(mutated),
+        )
+
+    def test_reordered_precedence_is_caught(self):
+        mutated = self.text.replace(
+            "1. the `mode` keyword argument to `configure()`;\n"
+            "2. the `SEMLOG_MODE` environment variable;\n",
+            "1. the `SEMLOG_MODE` environment variable;\n"
+            "2. the `mode` keyword argument to `configure()`;\n",
+            1,
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "precedence sequence is out of order",
+            guide_modes_narrative_problems(mutated),
+        )
+
+    def test_deleting_a_mode_value_bullet_is_caught(self):
+        mutated = self.text.replace(
+            "- **`off`**: `semlog=True` produces no JSON output and no "
+            "other side effect of its own; `configure()` installs nothing, "
+            "`operation()`, `bind()` and both middlewares keep working as "
+            "inert pass-throughs. A process that starts in `off` mode "
+            "behaves as if semlog were never installed. Reconfiguring an "
+            "already-running process from `full`/`hybrid` to `off` leaves "
+            "an already-installed JSON pipeline attached; `off` is a "
+            "process-start switch, not a live toggle. Removing `semlog` "
+            "from a service while `semlog=True` call sites remain raises "
+            "`TypeError` at an enabled call site rather than failing "
+            "silently; strip the keyword from call sites before "
+            "uninstalling.\n",
+            "",
+            1,
+        )
+        self.assertNotEqual(mutated, self.text)
+        problems = guide_modes_narrative_problems(mutated)
+        self.assertIn(f"missing mode-explanation bullet {'- **`off`**:'!r}", problems)
+        self.assertIn("missing TypeError", problems)
+        self.assertIn("missing off-as-process-start-switch phrase", problems)
+
+    def test_valueerror_changed_to_typeerror_is_caught(self):
+        mutated = self.text.replace(
+            "raises `ValueError` naming both the invalid value and its source.",
+            "raises `TypeError` naming both the invalid value and its source.",
+            1,
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn("missing ValueError", guide_modes_narrative_problems(mutated))
+
+    def test_removing_the_streamhandler_override_clause_is_caught(self):
+        mutated = self.text.replace(
+            ", and so may a `StreamHandler` subclass that overrides "
+            "`handle()` without calling `super().handle()`",
+            "",
+            1,
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            f"missing limitation marker {'super()'!r}",
+            guide_modes_narrative_problems(mutated),
+        )
+
+    def test_toml_example_mutation_is_caught(self):
+        # validate-wu69 #339, MINOR n3: the guide is a single file with no
+        # cross-edition parity check, so an edit here was previously
+        # undetected regardless of whether the READMEs stayed correct.
+        mutated = self.text.replace(_GUIDE_TOML_EXAMPLE, _GUIDE_TOML_EXAMPLE_MUTATED, 1)
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "TOML example missing or altered", guide_modes_narrative_problems(mutated)
+        )
+
+    def test_tomllib_caveat_version_mutation_is_caught(self):
+        mutated = self.text.replace(
+            "available on Python 3.11 and later",
+            "available on Python 3.10 and later",
+            1,
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing tomllib version caveat", guide_modes_narrative_problems(mutated)
+        )
+
+
 # ---------------------------------------------------------------------------
 # Perturbation proof: every check above that passed on its first run against
 # the real, already-correct files is demonstrated here to be capable of

@@ -17,7 +17,7 @@
 [![Django 3.2.9+](https://img.shields.io/badge/Django-%E2%89%A5%203.2.9-092E20?logo=django&logoColor=white)](.github/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](pyproject.toml)
-[![Requirements proven: 94/94](https://img.shields.io/badge/requirements%20proven-94%2F94-brightgreen)](STANDARDS.md)
+[![Requirements proven: 104/104](https://img.shields.io/badge/requirements%20proven-104%2F104-brightgreen)](STANDARDS.md)
 <!-- Enable after the first PyPI release:
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
 -->
@@ -58,7 +58,7 @@ logger.info("order.created", extra={"app.order.id": "ord_42", "app.order.total":
 Run `python app.py`. It prints one JSON line:
 
 ```json
-{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.1.0","telemetry.sdk.language":"python"}
+{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.2.0","telemetry.sdk.language":"python"}
 ```
 
 Three rules keep records useful:
@@ -176,17 +176,20 @@ Every `configure()` parameter is keyword-only; there is no settings object or di
 | Transport | `queue` | `True` | `False` writes synchronously, with no internal queue and no writer thread |
 | Transport | `queue_size` | `10000` | maximum number of queued lines |
 | Transport | `overflow` | `"block"` | `"block"` or `"drop"`, see [Queue overflow](#queue-overflow) |
+| Mode | `mode` | `None` (resolves to `"full"`) | `"full"`, `"hybrid"` or `"off"`; parameter > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"` |
 | Catalog | `catalog` | `None` | event catalog document (JSON) |
 | Catalog | `catalog_mode` | `"off"` without a catalog, `"warn"` with one | `"off"`, `"warn"` or `"strict"` |
 
 ### Precedence and environment variables
 
-Precedence, from highest to lowest, is always:
+For the identity and limit parameters below, precedence, from highest to lowest, is always:
 
 1. an explicit `configure()` parameter;
 2. the `OTEL_*` environment variable;
 3. `pyproject.toml`, on Python 3.11 and later only;
 4. the built-in default.
+
+`mode` follows its own precedence chain instead, described in [Modes](#modes).
 
 Recognized environment variables:
 
@@ -196,6 +199,7 @@ Recognized environment variables:
 | `OTEL_RESOURCE_ATTRIBUTES` | `service.namespace` (`service_namespace`), `service.version` (`service_version`), `service.instance.id` (`service_instance_id`) and `deployment.environment.name` (`environment`); also the fallback for `service.name` (`service_name`) |
 | `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`, `OTEL_ATTRIBUTE_COUNT_LIMIT` | the `max_attributes` limit |
 | `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` | the `max_attribute_length` limit |
+| `SEMLOG_MODE` | `mode` (see [Modes](#modes)) |
 
 When both variables of a limit are set, the `OTEL_LOGRECORD_*` variable wins over the generic `OTEL_ATTRIBUTE_*` one.
 
@@ -213,6 +217,38 @@ Each record is rendered on the calling thread and queued for a single writer thr
 | `overflow="block"` (default) | The call waits for room in the queue; no record is lost | No record may be lost and an occasional wait is acceptable |
 | `overflow="drop"` | The call never waits. At 90% capacity, records below `WARNING` are dropped; the last 10% is reserved for `WARNING`, `ERROR` and `CRITICAL`. Every drop is counted and reported | Application latency matters more than log completeness |
 | `queue=False` | Synchronous write, with no queue and no writer thread | Short scripts, debugging, environments without threads |
+
+## Modes
+
+`mode` selects how much of semlog is active in a process: `"full"` (the default, and the right choice for a new service), `"hybrid"`, and `"off"`.
+
+For a service already running in production, with its own existing log lines, `hybrid` is the adoption path: every line the service already prints keeps printing byte-identically, and a call written with the `semlog=True` keyword is hidden from that same printed output and instead becomes one JSON record. `logger.info("event.name", extra={...}, semlog=True)` is the shape of a call that adopts semlog this way. `off` behaves as if semlog were never installed at all, except that the keyword itself never raises, so it stays safe to leave in call sites while rolling back. `full` is the end state, and the default for a new service that has no existing log lines to preserve: the adoption path is `hybrid`, then `full` once its output has been reviewed. `mode` is switched by environment, with no code change required.
+
+- **`full`**: every log call goes through semlog's pipeline and becomes one JSON record per line, exactly as shown in [Output](#output).
+- **`hybrid`**: `configure()` never touches the root logger's existing handlers or level. A call made with `semlog=True` is hidden from every `StreamHandler` and instead emitted as one semlog JSON record; every other call keeps printing exactly as it did before semlog was installed. See [Limitations](#limitations) for the exact scope of this suppression.
+- **`off`**: `configure()` installs nothing and does not touch the root logger. `semlog=True` still never raises, but produces no JSON output and no other side effect of its own; `operation()`, `bind()` and both middlewares keep working as inert pass-throughs.
+
+### Configuration sources
+
+`mode` resolves from, in order of precedence:
+
+1. the `mode` keyword argument to `configure()`;
+2. the `SEMLOG_MODE` environment variable;
+3. the `mode` key under `[tool.semlog]` in `pyproject.toml`;
+4. the default, `"full"`.
+
+```toml
+[tool.semlog]
+mode = "hybrid"
+```
+
+Reading `pyproject.toml` needs the standard library's `tomllib`, available on Python 3.11 and later; on Python 3.10 this source is skipped entirely, and resolution falls through to the next one. The file is searched starting from the current working directory (or `configure(search_dir=...)`, when given) and upward through its parent directories; a container image built without the project's source tree present, or without the working directory set to it, often has no `pyproject.toml` to find, in which case this source is silently skipped, the same as on Python 3.10. An empty `SEMLOG_MODE` is treated as absent, the same as leaving it unset, and falls through to the next source; this does not apply to `[tool.semlog].mode`, where an empty string is a real declared value. A value that is present but outside `"full"`, `"hybrid"`, `"off"`, from any of the three sources, raises `ValueError` naming both the invalid value and the source it came from.
+
+### Limitations
+
+- **Hybrid's suppression is scoped to `StreamHandler.handle`.** Only `logging.StreamHandler` instances and subclasses that reach that method are hidden from a marked record. A handler outside that synchronous dispatch, such as a `logging.handlers.QueueHandler` paired with a `QueueListener`, or a `logging.handlers.MemoryHandler`, may still render a marked record as text; so may a `StreamHandler` subclass that overrides `handle()` without calling `super().handle()`. None of this is a defect, only the documented edge of what a method-level patch can reach.
+- **`off` is a process-start switch, not a live toggle.** A process that starts in `off` mode (or with `SEMLOG_MODE=off`) behaves as if semlog were never installed. Reconfiguring an already-running process from `full` or `hybrid` to `off` leaves the JSON pipeline already installed on the root logger attached; it does not tear it down.
+- **Uninstalling semlog while marked calls remain raises `TypeError`.** If `semlog` is removed from a service that still has `semlog=True` call sites, an enabled call at that call site fails with `TypeError`, rather than failing silently. Remove the keyword from call sites before uninstalling.
 
 ## Output
 
@@ -238,7 +274,7 @@ Every record is one JSON object per line, in UTF-8. This record was logged insid
   "service.instance.id": "936c21f2-7be1-4006-933a-e84d39621fe7",
   "deployment.environment.name": "production",
   "telemetry.sdk.name": "semlog",
-  "telemetry.sdk.version": "0.1.0",
+  "telemetry.sdk.version": "0.2.0",
   "telemetry.sdk.language": "python"
 }
 ```

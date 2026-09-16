@@ -34,11 +34,12 @@ def configure(
     queue: bool = True,
     queue_size: int = 10000,
     overflow: str = "block",
+    mode: str | None = None,
     search_dir: str | None = None,
 ) -> None: ...
 ```
 
-The single entry point. Call it exactly once, at process start, before the application starts logging. All parameters are keyword-only; there is no settings object and no settings dict. Calling it twice is safe: the last call wins, and the previous writer is drained and stopped. An invalid value or combination raises `ValueError` immediately, never later at runtime (for example, an `overflow` outside `"block"`/`"drop"`, or a non-positive `queue_size`). `search_dir` overrides the directory `pyproject.toml` detection searches upward from (instead of the current working directory); most callers never need it.
+The single entry point. Call it exactly once, at process start, before the application starts logging. All parameters are keyword-only; there is no settings object and no settings dict. Calling it twice is safe: the last call wins, and the previous writer is drained and stopped. An invalid value or combination raises `ValueError` immediately, never later at runtime (for example, an `overflow` outside `"block"`/`"drop"`, or a non-positive `queue_size`). `search_dir` overrides the directory `pyproject.toml` detection searches upward from (instead of the current working directory); most callers never need it. `mode` selects `"full"` (default), `"hybrid"` or `"off"`; precedence is the `mode` parameter, then `SEMLOG_MODE`, then `[tool.semlog].mode` (3.11+), then `"full"`.
 
 `capture_loggers` removes a third-party logger's own handlers (for example a server's error/access logger) and turns propagation on, so its records flow through the same pipeline instead of a separate one. `baggage_allow`/`baggage_prefix`/`accept_inbound_baggage` set the process-wide default: `operation()`, `WSGIMiddleware`, and `ASGIMiddleware` each still accept their own `baggage_allow` (see below) to override it per instance, but a plain `WSGIMiddleware(app)` with no `baggage_allow` uses the value configured here. `accept_inbound_baggage=False` makes every middleware/`operation()` ignore an inbound `baggage` header entirely, regardless of any allowlist. `queue=False` writes every record synchronously, on the caller's own thread, with no internal queue and no writer thread, like a plain stdlib `StreamHandler`.
 
@@ -186,7 +187,7 @@ The full normative field order, presence rules, and the published JSON Schema li
 
 ## Configuration and precedence
 
-All `configure()` parameters are keyword-only; there is no settings object or dict. Precedence, highest to lowest, is always: explicit `configure()` parameter > `OTEL_*` environment variable > `pyproject.toml` (`[project]`, then `[tool.poetry]` as a fallback) > built-in default. A forced value (parameter or environment variable) always wins over a detected one.
+All `configure()` parameters are keyword-only; there is no settings object or dict. For the identity and limit parameters below, precedence, highest to lowest, is always: explicit `configure()` parameter > `OTEL_*` environment variable > `pyproject.toml` (`[project]`, then `[tool.poetry]` as a fallback) > built-in default. A forced value (parameter or environment variable) always wins over a detected one. `mode` follows its own precedence chain instead, described in "Execution modes and the semlog=True keyword" below.
 
 | Group | Parameter | Default | Notes |
 |---|---|---|---|
@@ -210,12 +211,38 @@ All `configure()` parameters are keyword-only; there is no settings object or di
 | Transport | `queue` | `True` | `False` = synchronous write, no internal queue, no writer thread |
 | Transport | `queue_size` | `10000` | maximum queued lines; `configure()` raises `ValueError` for a non-positive value |
 | Transport | `overflow` | `"block"` | `"block"` waits for room (default, nothing lost); `"drop"` never waits and drops low-severity records first; any other value raises `ValueError` |
+| Mode | `mode` | `None` (resolves to `"full"`) | `"full"`, `"hybrid"` or `"off"`; parameter > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"`; any other value raises `ValueError` naming the value and its source |
 | Catalog | `catalog` | `None` | event catalog document (JSON) |
 | Catalog | `catalog_mode` | `"off"` without a catalog, `"warn"` with one | `"off"`, `"warn"`, `"strict"` |
 
-Recognized environment variables: `OTEL_SERVICE_NAME`; `OTEL_RESOURCE_ATTRIBUTES` (for `service.namespace`, `service.version`, `service.instance.id`, `deployment.environment.name`, and as a fallback for `service.name`); the pairs `OTEL_ATTRIBUTE_COUNT_LIMIT`/`OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT` and `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`/`OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`.
+Recognized environment variables: `OTEL_SERVICE_NAME`; `OTEL_RESOURCE_ATTRIBUTES` (for `service.namespace`, `service.version`, `service.instance.id`, `deployment.environment.name`, and as a fallback for `service.name`); the pairs `OTEL_ATTRIBUTE_COUNT_LIMIT`/`OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT` and `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT`/`OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`; `SEMLOG_MODE` (for `mode`).
 
 On Python 3.11 and later, `service_name` and `service_version` are detected by reading `pyproject.toml` with stdlib `tomllib`. Python 3.10 has no `tomllib`, and semlog does not bundle a third-party TOML reader: on 3.10, `pyproject.toml` is not read at all, resolution falls back to the explicit parameter, the `OTEL_*` variables, or installed package metadata, and a distinct startup diagnostic notes that detection was skipped for this reason (not because the file was missing).
+
+### Execution modes and the semlog=True keyword
+
+`mode` selects how much of semlog is active in a process: `"full"` (the default, and the right choice for a new service), `"hybrid"` (the adoption path for a service already running in production, with its own existing log lines), and `"off"` (behaves as if semlog were never installed).
+
+Resolution precedence, highest to lowest:
+
+1. the `mode` keyword argument to `configure()`;
+2. the `SEMLOG_MODE` environment variable;
+3. the `mode` key under `[tool.semlog]` in `pyproject.toml`:
+
+```toml
+[tool.semlog]
+mode = "hybrid"
+```
+
+4. the default, `"full"`.
+
+Reading `pyproject.toml` needs `tomllib`, available on Python 3.11 and later; on 3.10 this source is skipped entirely. The file is searched from the current working directory (or `configure(search_dir=...)`) upward through its parents; a container image built without the project's source tree, or without the working directory set to it, often has none to find, and this source is silently skipped the same as on 3.10. An empty `SEMLOG_MODE` is treated as absent, the same as unset, and falls through to the next source; this does not apply to `[tool.semlog].mode`, where an empty string is a real declared value. A value that is present but outside `"full"`, `"hybrid"`, `"off"`, from any of the three sources, raises `ValueError` naming both the invalid value and its source.
+
+Once `semlog` is imported, every `logging.Logger` call accepts the keyword-only `semlog=True`, in every mode, including before `configure()` runs; this keyword never raises. Its effect depends on `mode`:
+
+- **`full`**: `semlog=True` has no additional effect: every call already becomes one JSON record regardless of the keyword.
+- **`hybrid`**: `configure()` never touches the root logger's existing handlers or level. A call made with `semlog=True`, for example `logger.info("event.name", extra={...}, semlog=True)`, is hidden from every `StreamHandler` and instead emitted as one semlog JSON record; every other call keeps printing exactly as it did before `semlog` was installed. This suppression is a patch on `StreamHandler.handle` itself: a handler outside that synchronous dispatch, such as a `logging.handlers.QueueHandler` paired with a `QueueListener`, or a `logging.handlers.MemoryHandler`, may still render a marked record as text, and so may a `StreamHandler` subclass that overrides `handle()` without calling `super().handle()`; none of this is a defect.
+- **`off`**: `semlog=True` produces no JSON output and no other side effect of its own; `configure()` installs nothing, `operation()`, `bind()` and both middlewares keep working as inert pass-throughs. A process that starts in `off` mode behaves as if semlog were never installed. Reconfiguring an already-running process from `full`/`hybrid` to `off` leaves an already-installed JSON pipeline attached; `off` is a process-start switch, not a live toggle. Removing `semlog` from a service while `semlog=True` call sites remain raises `TypeError` at an enabled call site rather than failing silently; strip the keyword from call sites before uninstalling.
 
 ## FastAPI recipe
 

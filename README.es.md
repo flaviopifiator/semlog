@@ -17,7 +17,7 @@
 [![Django 3.2.9+](https://img.shields.io/badge/Django-%E2%89%A5%203.2.9-092E20?logo=django&logoColor=white)](.github/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](pyproject.toml)
-[![Requirements proven: 94/94](https://img.shields.io/badge/requirements%20proven-94%2F94-brightgreen)](STANDARDS.md)
+[![Requirements proven: 104/104](https://img.shields.io/badge/requirements%20proven-104%2F104-brightgreen)](STANDARDS.md)
 <!-- Enable after the first PyPI release:
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
 -->
@@ -58,7 +58,7 @@ logger.info("order.created", extra={"app.order.id": "ord_42", "app.order.total":
 Ejecute `python app.py`. Imprime una línea JSON:
 
 ```json
-{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.1.0","telemetry.sdk.language":"python"}
+{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.2.0","telemetry.sdk.language":"python"}
 ```
 
 Tres reglas mantienen útiles los registros:
@@ -176,17 +176,20 @@ Todos los parámetros de `configure()` son de solo palabra clave (*keyword-only*
 | Transporte | `queue` | `True` | `False` escribe de forma síncrona, sin cola interna ni hilo escritor |
 | Transporte | `queue_size` | `10000` | cantidad máxima de líneas en la cola |
 | Transporte | `overflow` | `"block"` | `"block"` o `"drop"`, ver [Desborde de la cola](#desborde-de-la-cola) |
+| Modo | `mode` | `None` (se resuelve a `"full"`) | `"full"`, `"hybrid"` o `"off"`; parámetro > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"` |
 | Catálogo | `catalog` | `None` | documento del catálogo de eventos (JSON) |
 | Catálogo | `catalog_mode` | `"off"` sin catálogo, `"warn"` con catálogo | `"off"`, `"warn"` o `"strict"` |
 
 ### Precedencia y variables de entorno
 
-El orden de precedencia, de mayor a menor, es siempre:
+Para los parámetros de identidad y de límites que siguen, el orden de precedencia, de mayor a menor, es siempre:
 
 1. un parámetro explícito de `configure()`;
 2. la variable de entorno `OTEL_*`;
 3. `pyproject.toml`, solo en Python 3.11 y posteriores;
 4. el valor por defecto.
+
+`mode` sigue su propio orden de precedencia, descrito en [Modos](#modos).
 
 Variables de entorno reconocidas:
 
@@ -196,6 +199,7 @@ Variables de entorno reconocidas:
 | `OTEL_RESOURCE_ATTRIBUTES` | `service.namespace` (`service_namespace`), `service.version` (`service_version`), `service.instance.id` (`service_instance_id`) y `deployment.environment.name` (`environment`); también es el respaldo de `service.name` (`service_name`) |
 | `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`, `OTEL_ATTRIBUTE_COUNT_LIMIT` | el límite `max_attributes` |
 | `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` | el límite `max_attribute_length` |
+| `SEMLOG_MODE` | `mode` (ver [Modos](#modos)) |
 
 Cuando las dos variables de un límite están definidas, la variable `OTEL_LOGRECORD_*` gana sobre la genérica `OTEL_ATTRIBUTE_*`.
 
@@ -213,6 +217,38 @@ Cada registro se renderiza en el hilo que hace la llamada y se encola para un ú
 | `overflow="block"` (por defecto) | La llamada espera hasta que haya espacio en la cola; no se pierde ningún registro | No se puede perder ningún registro y una espera ocasional es aceptable |
 | `overflow="drop"` | La llamada nunca espera. Al 90 % de ocupación se descartan los registros por debajo de `WARNING`; el 10 % restante se reserva para `WARNING`, `ERROR` y `CRITICAL`. Cada descarte se cuenta y se reporta | La latencia de la aplicación importa más que la completitud del registro |
 | `queue=False` | Escritura síncrona, sin cola ni hilo escritor | Scripts cortos, depuración, entornos sin hilos |
+
+## Modos
+
+`mode` selecciona cuánto de semlog está activo en un proceso: `"full"` (el valor por defecto, y la opción correcta para un servicio nuevo), `"hybrid"` y `"off"`.
+
+Para un servicio que ya está en producción, con sus propias líneas de registro existentes, `hybrid` es la vía de adopción: cada línea que el servicio ya imprime sigue imprimiéndose de forma idéntica byte a byte, y una llamada escrita con la palabra clave `semlog=True` queda oculta de esa misma salida impresa y se convierte, en su lugar, en un registro JSON. `logger.info("event.name", extra={...}, semlog=True)` es la forma de una llamada que adopta semlog de esta manera. `off` se comporta como si semlog nunca se hubiera instalado, salvo que la propia palabra clave nunca lanza una excepción, de modo que resulta seguro dejarla en los puntos de llamada durante una reversión. `full` es el estado final, y el valor por defecto para un servicio nuevo que no tiene líneas de registro existentes que preservar: la vía de adopción es `hybrid`, y luego `full` una vez revisada su salida. `mode` se cambia por entorno, sin necesidad de modificar código.
+
+- **`full`**: cada llamada de registro pasa por la tubería de semlog y se convierte en un registro JSON por línea, exactamente como se muestra en [Salida](#salida).
+- **`hybrid`**: `configure()` nunca toca los manejadores ni el nivel existentes del logger raíz. Una llamada hecha con `semlog=True` queda oculta de todo `StreamHandler` y se emite, en su lugar, como un registro JSON de semlog; cualquier otra llamada sigue imprimiéndose exactamente igual que antes de instalar semlog. Ver [Limitaciones](#limitaciones) para el alcance exacto de esta supresión.
+- **`off`**: `configure()` no instala nada y no toca el logger raíz. `semlog=True` sigue sin lanzar nunca una excepción, pero no produce salida JSON ni ningún otro efecto propio; `operation()`, `bind()` y ambos middlewares siguen funcionando como mecanismos de paso inertes.
+
+### Fuentes de configuración
+
+`mode` se resuelve, en orden de precedencia:
+
+1. el argumento de palabra clave `mode` de `configure()`;
+2. la variable de entorno `SEMLOG_MODE`;
+3. la clave `mode` bajo `[tool.semlog]` en `pyproject.toml`;
+4. el valor por defecto, `"full"`.
+
+```toml
+[tool.semlog]
+mode = "hybrid"
+```
+
+Leer `pyproject.toml` necesita `tomllib` de la biblioteca estándar, disponible desde Python 3.11 en adelante; en Python 3.10 esta fuente se omite por completo, y la resolución continúa con la siguiente. El archivo se busca a partir del directorio de trabajo actual (o de `configure(search_dir=...)`, si se indica) y hacia arriba por sus directorios padres; una imagen de contenedor construida sin el árbol de fuentes del proyecto presente, o sin el directorio de trabajo apuntando a él, con frecuencia no tiene ningún `pyproject.toml` que encontrar, en cuyo caso esta fuente se omite en silencio, igual que en Python 3.10. Una `SEMLOG_MODE` vacía se trata como ausente, igual que si no estuviera definida, y la resolución continúa con la siguiente fuente; esto no aplica a `[tool.semlog].mode`, donde una cadena vacía es un valor declarado real. Un valor presente pero fuera de `"full"`, `"hybrid"`, `"off"`, proveniente de cualquiera de las tres fuentes, lanza `ValueError` nombrando tanto el valor inválido como la fuente de la que proviene.
+
+### Limitaciones
+
+- **La supresión de hybrid está limitada a `StreamHandler.handle`.** Solo las instancias de `logging.StreamHandler` y sus subclases que llegan a ese método quedan ocultas de un registro marcado. Un manejador fuera de ese despacho síncrono, como un `logging.handlers.QueueHandler` emparejado con un `QueueListener`, o un `logging.handlers.MemoryHandler`, puede seguir renderizando un registro marcado como texto; lo mismo puede ocurrir con una subclase de `StreamHandler` que sobrescribe `handle()` sin llamar a `super().handle()`. Nada de esto es un defecto, solo el límite documentado de lo que alcanza un parche a nivel de método.
+- **`off` es un interruptor de inicio de proceso, no un cambio en caliente.** Un proceso que arranca en modo `off` (o con `SEMLOG_MODE=off`) se comporta como si semlog nunca se hubiera instalado. Reconfigurar un proceso ya en ejecución de `full` o `hybrid` a `off` deja instalada, sin desmontar, la tubería JSON que ya estaba adjunta al logger raíz.
+- **Desinstalar semlog mientras quedan llamadas marcadas lanza `TypeError`.** Si `semlog` se retira de un servicio que aún tiene puntos de llamada con `semlog=True`, una llamada habilitada en ese punto de llamada falla con `TypeError`, en lugar de fallar en silencio. Quite la palabra clave de los puntos de llamada antes de desinstalar.
 
 ## Salida
 
@@ -238,7 +274,7 @@ Cada registro es un objeto JSON por línea, en UTF-8. Este registro se emitió d
   "service.instance.id": "936c21f2-7be1-4006-933a-e84d39621fe7",
   "deployment.environment.name": "production",
   "telemetry.sdk.name": "semlog",
-  "telemetry.sdk.version": "0.1.0",
+  "telemetry.sdk.version": "0.2.0",
   "telemetry.sdk.language": "python"
 }
 ```

@@ -9,6 +9,7 @@ import contextvars
 import logging
 import time
 
+from . import _modes
 from ._context import pop, push, snapshot_from_headers
 
 # The optional HTM-007 completion event's own scope (design #162 §2.4);
@@ -29,7 +30,12 @@ def _emit_request_event(method, path, status_code, duration_ns, exc_info=None):
     """HTM-007's optional `http.server.request` event, shared by both
     middlewares: `http.request.method`, `url.path`,
     `http.response.status_code`, `event.duration` (ns); never `url.query`.
-    A failure here must never reach the wrapped application."""
+    A failure here must never reach the wrapped application. `off` mode
+    emits nothing at all (LM-005); every other mode marks the event
+    `semlog=True`, so hybrid routes it to JSON only, never legacy text
+    (LM-003), while full keeps its existing unmarked-equivalent behavior."""
+    if _modes.is_off():
+        return
     try:
         _REQUEST_LOGGER.log(
             logging.ERROR if exc_info else logging.INFO,
@@ -41,6 +47,7 @@ def _emit_request_event(method, path, status_code, duration_ns, exc_info=None):
                 "event.duration": duration_ns,
             },
             exc_info=exc_info,
+            semlog=True,
         )
     except Exception:  # noqa: BLE001, S110 -- HTM-007: never break the app
         pass
@@ -91,6 +98,10 @@ class WSGIMiddleware:
         self._log_requests = log_requests
 
     def __call__(self, environ, start_response):
+        if _modes.is_off():
+            # LM-005: as if semlog were not installed -- no scope pushed,
+            # so inject()/bind() called from inside the app are inert.
+            return self.app(environ, start_response)
         snapshot = snapshot_from_headers(
             _wsgi_header(environ), baggage_allow=self._baggage_allow
         )
@@ -162,7 +173,9 @@ class ASGIMiddleware:
         self._log_requests = log_requests
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
+        if scope["type"] != "http" or _modes.is_off():
+            # LM-005: off is inert here too -- no scope, so inject()/bind()
+            # called from inside the app are inert.
             await self.app(scope, receive, send)
             return
         snapshot = snapshot_from_headers(

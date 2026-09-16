@@ -11,6 +11,7 @@ import urllib.parse
 from collections.abc import Mapping
 from types import MappingProxyType
 
+from . import _modes
 from ._baggage import defaults as _baggage_defaults
 from ._baggage import parse_baggage, to_log_attributes
 from ._request_id import generate_request_id
@@ -78,7 +79,13 @@ def operation(headers=None, *, baggage_allow=None):
     """Bind a trace/baggage scope for non-HTTP work (design #162 §2.3,
     TCP-005): the same primitive the HTTP middlewares use. With `headers`,
     parses them like an inbound request; without, starts a child of the
-    current operation if one is active, else a fresh trace."""
+    current operation if one is active, else a fresh trace. In `off` mode
+    (LM-005), this stays a working context manager but never actually
+    binds anything: it yields a fresh, unbound `Snapshot()` and every
+    field-generation cost (trace/span ids, baggage parsing) is skipped."""
+    if _modes.is_off():
+        yield Snapshot()
+        return
     parent = current()
     if headers is not None:
         snapshot = snapshot_from_headers(headers.get, baggage_allow=baggage_allow)
@@ -111,14 +118,17 @@ _bind_warned = False
 
 def bind(attributes: Mapping[str, object]) -> None:
     """Merge `attributes` into the active scope (TCP-005); outside a scope,
-    warn once through the `semlog` logger and no-op (TCP-012)."""
+    warn once through the `semlog` logger and no-op (TCP-012). In `off`
+    mode, that diagnostic is suppressed entirely (LM-005): `off`'s
+    `operation()` never binds anything either, so `bind()` already has no
+    effect there; only the once-per-process warning needs its own gate."""
     global _bind_warned
     snapshot = current()
     if snapshot is None:
-        if not _bind_warned:
+        if not _bind_warned and not _modes.is_off():
             _bind_warned = True
             logging.getLogger("semlog").warning(
-                "semlog.log.bind_ignored", stack_info=True
+                "semlog.log.bind_ignored", stack_info=True, semlog=True
             )
         return
     push(
