@@ -17,10 +17,25 @@ requires-python = ">=3.10"
 # (never inside the importable package -- task 4.23/A7 verifies this).
 license = "Apache-2.0"
 license-files = ["LICENSE"]
+# PyPI's search reads the name, the summary, the description and these
+# keywords, and nothing else; without them semlog is findable only by
+# name. Lowercase and unique, checked by tests/test_packaging.py.
+keywords = [
+    "logging",
+    "structured logging",
+    "json",
+    "opentelemetry",
+    "otel",
+    "observability",
+    "trace context",
+    "stdlib",
+    "zero dependencies",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Framework :: Django",
     "Framework :: FastAPI",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3.10",
@@ -28,6 +43,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Logging",
     # Backed by the PEP 561 marker at src/semlog/py.typed, which ships
     # inside the wheel so a type checker reads the package's inline
@@ -45,6 +61,9 @@ authors = [{ name = "flaviopifiator" }]
 [project.urls]
 Homepage = "https://github.com/flaviopifiator/semlog"
 Repository = "https://github.com/flaviopifiator/semlog"
+# There is no documentation site yet, so this points at the README
+# rendered on the repository page; PyPI shows it as a sidebar link.
+Documentation = "https://github.com/flaviopifiator/semlog#readme"
 Issues = "https://github.com/flaviopifiator/semlog/issues"
 Changelog = "https://github.com/flaviopifiator/semlog/blob/main/CHANGELOG.md"
 
