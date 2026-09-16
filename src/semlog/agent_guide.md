@@ -219,9 +219,30 @@ Recognized environment variables: `OTEL_SERVICE_NAME`; `OTEL_RESOURCE_ATTRIBUTES
 
 On Python 3.11 and later, `service_name` and `service_version` are detected by reading `pyproject.toml` with stdlib `tomllib`. Python 3.10 has no `tomllib`, and semlog does not bundle a third-party TOML reader: on 3.10, `pyproject.toml` is not read at all, resolution falls back to the explicit parameter, the `OTEL_*` variables, or installed package metadata, and a distinct startup diagnostic notes that detection was skipped for this reason (not because the file was missing).
 
-### Hybrid mode limitation
+### Execution modes and the semlog=True keyword
 
-In `mode="hybrid"`, only records logged with `semlog=True` reach semlog's own JSON output; every other line prints exactly as it already does. This suppression targets `logging.StreamHandler` and its subclasses only. A handler outside that synchronous dispatch, such as a `logging.handlers.QueueHandler` paired with a `QueueListener`, or a `logging.handlers.MemoryHandler`, may still render a marked record as text; this is a documented limitation, not a defect.
+`mode` selects how much of semlog is active in a process: `"full"` (the default, and the right choice for a new service), `"hybrid"` (the adoption path for a service already running in production, with its own existing log lines), and `"off"` (behaves as if semlog were never installed).
+
+Resolution precedence, highest to lowest:
+
+1. the `mode` keyword argument to `configure()`;
+2. the `SEMLOG_MODE` environment variable;
+3. the `mode` key under `[tool.semlog]` in `pyproject.toml`:
+
+```toml
+[tool.semlog]
+mode = "hybrid"
+```
+
+4. the default, `"full"`.
+
+Reading `pyproject.toml` needs `tomllib`, available on Python 3.11 and later; on 3.10 this source is skipped entirely. The file is searched from the current working directory (or `configure(search_dir=...)`) upward through its parents; a container image built without the project's source tree, or without the working directory set to it, often has none to find, and this source is silently skipped the same as on 3.10. An empty `SEMLOG_MODE` is treated as absent, the same as unset, and falls through to the next source; this does not apply to `[tool.semlog].mode`, where an empty string is a real declared value. A value that is present but outside `"full"`, `"hybrid"`, `"off"`, from any of the three sources, raises `ValueError` naming both the invalid value and its source.
+
+Once `semlog` is imported, every `logging.Logger` call accepts the keyword-only `semlog=True`, in every mode, including before `configure()` runs; this keyword never raises. Its effect depends on `mode`:
+
+- **`full`**: `semlog=True` has no additional effect: every call already becomes one JSON record regardless of the keyword.
+- **`hybrid`**: `configure()` never touches the root logger's existing handlers or level. A call made with `semlog=True`, for example `logger.info("event.name", extra={...}, semlog=True)`, is hidden from every `StreamHandler` and instead emitted as one semlog JSON record; every other call keeps printing exactly as it did before `semlog` was installed. This suppression is a patch on `StreamHandler.handle` itself: a handler outside that synchronous dispatch, such as a `logging.handlers.QueueHandler` paired with a `QueueListener`, or a `logging.handlers.MemoryHandler`, may still render a marked record as text, and so may a `StreamHandler` subclass that overrides `handle()` without calling `super().handle()`; none of this is a defect.
+- **`off`**: `semlog=True` produces no JSON output and no other side effect of its own; `configure()` installs nothing, `operation()`, `bind()` and both middlewares keep working as inert pass-throughs. A process that starts in `off` mode behaves as if semlog were never installed. Reconfiguring an already-running process from `full`/`hybrid` to `off` leaves an already-installed JSON pipeline attached; `off` is a process-start switch, not a live toggle. Removing `semlog` from a service while `semlog=True` call sites remain raises `TypeError` at an enabled call site rather than failing silently; strip the keyword from call sites before uninstalling.
 
 ## FastAPI recipe
 

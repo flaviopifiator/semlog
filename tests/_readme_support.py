@@ -23,6 +23,9 @@ READMES = {
         "configuration": "Configuration",
         "documentation": "Documentation",
         "performance": "Performance",
+        "modes": "Modes",
+        "configuration_sources": "Configuration sources",
+        "limitations": "Limitations",
     },
     "es": {
         "path": REPO_ROOT / "README.es.md",
@@ -30,6 +33,9 @@ READMES = {
         "configuration": "Configuración",
         "documentation": "Documentación",
         "performance": "Rendimiento",
+        "modes": "Modos",
+        "configuration_sources": "Fuentes de configuración",
+        "limitations": "Limitaciones",
     },
 }
 

@@ -182,14 +182,78 @@ class ReadmeParityPerturbationTests(unittest.TestCase):
         self.assertNotEqual(_badge_set(self.english), _badge_set(mutated))
 
 
+_MODE_BULLET_MARKERS = ("- **`full`**:", "- **`hybrid`**:", "- **`off`**:")
+_PRECEDENCE_TOKENS = ("configure(", "SEMLOG_MODE", "[tool.semlog]")
+_LIMITATION_MARKERS = (
+    "StreamHandler",
+    "QueueHandler",
+    "QueueListener",
+    "MemoryHandler",
+    "super()",
+)
+
+
+def modes_narrative_problems(text, language):
+    """Every way `text`'s "## Modes"/"## Modos" section fails to prove
+    DOC-012/LM-004's full narrative (empty when it proves everything).
+    Every check is scoped to the relevant section or subsection span (via
+    `section()`), never a whole-document `in` check, so an unrelated
+    mention of the same word elsewhere in a 20+ KB document (validate-wu69
+    #338, MAJOR M1) cannot satisfy it. `configure(`, `SEMLOG_MODE`,
+    `[tool.semlog]`, the mode value literals, `StreamHandler`-family
+    names, `super()`, `SEMLOG_MODE=off` and `TypeError` are all
+    language-neutral technical tokens, unchanged in the Spanish edition,
+    so the same checks apply to both editions verbatim."""
+    labels = READMES[language]
+    problems = []
+    try:
+        modes_text = section(text, 2, labels["modes"])
+    except ValueError:
+        return ["no Modes section"]
+
+    for marker in _MODE_BULLET_MARKERS:
+        if marker not in modes_text:
+            problems.append(f"missing mode-explanation bullet {marker!r}")
+
+    try:
+        sources_text = section(modes_text, 3, labels["configuration_sources"])
+    except ValueError:
+        problems.append("no Configuration sources subsection")
+        sources_text = ""
+    positions = [sources_text.find(token) for token in _PRECEDENCE_TOKENS]
+    for token, position in zip(_PRECEDENCE_TOKENS, positions):
+        if position == -1:
+            problems.append(f"missing precedence token {token!r}")
+    if all(position != -1 for position in positions) and positions != sorted(positions):
+        problems.append("precedence sequence is out of order")
+    if "ValueError" not in sources_text:
+        problems.append("missing ValueError")
+
+    try:
+        limitations_text = section(modes_text, 3, labels["limitations"])
+    except ValueError:
+        problems.append("no Limitations subsection")
+        limitations_text = ""
+    for marker in _LIMITATION_MARKERS:
+        if marker not in limitations_text:
+            problems.append(f"missing limitation marker {marker!r}")
+    if "SEMLOG_MODE=off" not in limitations_text:
+        problems.append("missing off-as-process-start-switch bullet")
+    if "TypeError" not in limitations_text:
+        problems.append("missing TypeError bullet")
+
+    return problems
+
+
 class ReadmeModesParityTests(unittest.TestCase):
-    """LM-004 (errata 12): both README editions must document hybrid mode's
-    suppression limitation, naming `StreamHandler` as the suppression
-    scope and both `QueueHandler`/`QueueListener` and `MemoryHandler` as
-    handlers that may still render a marked record as text; this is one
-    of DOC-012's four required README topics. The mode/precedence/keyword
-    narrative itself is a later documentation work unit (WU7); this class
-    covers only the limitation text landing now.
+    """DOC-012's four required README topics, in both editions: the three
+    modes and their ORDERED resolution precedence (LM-001), the
+    `semlog=True` keyword (LM-002), hybrid's suppression scope with its
+    `StreamHandler`-subclass-override and `QueueHandler`/`QueueListener`/
+    `MemoryHandler` exceptions (LM-004, errata 12, validate-wu69 #338 m2),
+    and `off` as the rollback switch, including the uninstall-`TypeError`
+    caveat. Every assertion is section-scoped (`modes_narrative_problems`),
+    not a whole-file token check (validate-wu69 #338, MAJOR M1).
 
     Proves: LM-004, DOC-012
     """
@@ -198,17 +262,100 @@ class ReadmeModesParityTests(unittest.TestCase):
     def setUpClass(cls):
         cls.texts = {language: readme_text(language) for language in READMES}
 
-    def test_both_editions_document_the_streamhandler_only_scope(self):
+    def test_both_editions_prove_the_full_modes_narrative(self):
         for language, text in self.texts.items():
             with self.subTest(language=language):
-                self.assertIn("StreamHandler", text)
+                self.assertEqual([], modes_narrative_problems(text, language))
 
-    def test_both_editions_name_queuehandler_and_memoryhandler_as_exceptions(self):
+    def test_both_editions_document_the_semlog_true_keyword(self):
         for language, text in self.texts.items():
             with self.subTest(language=language):
-                self.assertIn("QueueHandler", text)
-                self.assertIn("QueueListener", text)
-                self.assertIn("MemoryHandler", text)
+                modes_text = section(text, 2, READMES[language]["modes"])
+                self.assertIn("semlog=True", modes_text)
+
+
+class ReadmeModesPerturbationTests(unittest.TestCase):
+    """Every check `modes_narrative_problems` performs is demonstrated
+    here to be capable of failing, against deliberately broken in-memory
+    copies of the real README text (validate-wu69 #338, MAJOR M1's
+    required mutation coverage). The real files are never written to."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.english = readme_text("en")
+
+    def test_baseline_has_no_problems(self):
+        self.assertEqual([], modes_narrative_problems(self.english, "en"))
+
+    def test_deleting_the_modes_section_entirely_is_caught(self):
+        start = self.english.index("## Modes")
+        end = self.english.index("## Output")
+        mutated = self.english[:start] + self.english[end:]
+        self.assertNotEqual(mutated, self.english)
+        self.assertEqual(["no Modes section"], modes_narrative_problems(mutated, "en"))
+
+    def test_reordered_precedence_is_caught(self):
+        mutated = self.english.replace(
+            "1. the `mode` keyword argument to `configure()`;\n"
+            "2. the `SEMLOG_MODE` environment variable;\n",
+            "1. the `SEMLOG_MODE` environment variable;\n"
+            "2. the `mode` keyword argument to `configure()`;\n",
+            1,
+        )
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "precedence sequence is out of order",
+            modes_narrative_problems(mutated, "en"),
+        )
+
+    def test_deleting_a_mode_value_bullet_is_caught(self):
+        mutated = self.english.replace(
+            "- **`off`**: `configure()` installs nothing and does not touch "
+            "the root logger. `semlog=True` still never raises, but produces "
+            "no JSON output and no other side effect of its own; "
+            "`operation()`, `bind()` and both middlewares keep working as "
+            "inert pass-throughs.\n",
+            "",
+            1,
+        )
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            f"missing mode-explanation bullet {'- **`off`**:'!r}",
+            modes_narrative_problems(mutated, "en"),
+        )
+
+    def test_valueerror_changed_to_typeerror_is_caught(self):
+        mutated = self.english.replace(
+            "raises `ValueError` naming both the invalid value",
+            "raises `TypeError` naming both the invalid value",
+            1,
+        )
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn("missing ValueError", modes_narrative_problems(mutated, "en"))
+
+    def test_removing_the_streamhandler_limitation_bullet_is_caught(self):
+        mutated = re.sub(
+            r"(?m)^- \*\*Hybrid's suppression is scoped.*\n", "", self.english
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = modes_narrative_problems(mutated, "en")
+        self.assertTrue(any("StreamHandler" in p for p in problems))
+        self.assertTrue(any("super()" in p for p in problems))
+
+    def test_removing_the_off_limitation_bullet_is_caught(self):
+        mutated = re.sub(r"(?m)^- \*\*`off` is a process-start.*\n", "", self.english)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing off-as-process-start-switch bullet",
+            modes_narrative_problems(mutated, "en"),
+        )
+
+    def test_removing_the_typeerror_limitation_bullet_is_caught(self):
+        mutated = re.sub(r"(?m)^- \*\*Uninstalling semlog.*\n", "", self.english)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing TypeError bullet", modes_narrative_problems(mutated, "en")
+        )
 
 
 if __name__ == "__main__":
