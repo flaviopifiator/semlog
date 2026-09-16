@@ -36,8 +36,16 @@ async def async_thread_view(request):
     return JsonResponse({"thread_ident": threading.get_ident()})
 
 
+def boom_view(request):
+    """Raises unconditionally: Django's own `convert_exception_to_response`
+    converts this into a 500 response, calling every registered
+    middleware's `process_exception` first (HTM-011)."""
+    raise RuntimeError("matrix-boom")
+
+
 urlpatterns = [
     path("sync/", sync_view),
     path("async/", async_view),
     path("async-thread/", async_thread_view),
+    path("boom/", boom_view),
 ]

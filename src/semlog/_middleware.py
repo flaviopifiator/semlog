@@ -275,8 +275,14 @@ class DjangoMiddleware:
             request.headers.get, baggage_allow=self._baggage_allow
         )
         token = push(snapshot)
+        start = time.perf_counter_ns() if self._log_requests else None
         try:
             response = self.get_response(request)
+            # Emit while OUR OWN snapshot is still bound, not after
+            # popping (matches WSGIMiddleware/ASGIMiddleware precedent):
+            # popping first would make the event read whatever context was
+            # current before this middleware ran instead of its own.
+            self._emit_completion_event(request, response, start)
         finally:
             pop(token)
         return response
@@ -288,11 +294,45 @@ class DjangoMiddleware:
             request.headers.get, baggage_allow=self._baggage_allow
         )
         token = push(snapshot)
+        start = time.perf_counter_ns() if self._log_requests else None
         try:
             response = await self.get_response(request)
+            # Synchronous post-processing of the response, on the loop
+            # thread (design D1): no `sync_to_async` hop occurred, so
+            # reading a plain attribute here never raises.
+            self._emit_completion_event(request, response, start)
         finally:
             pop(token)
-        # Synchronous post-processing of the response, on the loop thread
-        # (design D1): no `sync_to_async` hop occurred, so reading a plain
-        # attribute here never raises.
         return response
+
+    def process_exception(self, request, exception):
+        """HTM-011: stash the exception without swallowing it, and always
+        return `None` so Django's own exception handling is never
+        modified. Short-circuits in `off` mode too, matching `__call__`/
+        `__acall__`'s own true pass-through."""
+        if _modes.is_off():
+            return
+        request._semlog_exc_info = (
+            type(exception),
+            exception,
+            exception.__traceback__,
+        )
+        return
+
+    def _emit_completion_event(self, request, response, start):
+        """HTM-007/HTM-011: read then clear whatever `process_exception`
+        stashed on `request`, regardless of `log_requests`, so no
+        internal attribute survives on the request object; emit the
+        optional completion event only when enabled, applying
+        `_emit_request_event`'s existing INFO/ERROR selection against the
+        real final `status_code`."""
+        exc_info = request.__dict__.pop("_semlog_exc_info", None)
+        if not self._log_requests:
+            return
+        _emit_request_event(
+            request.method,
+            request.path,
+            response.status_code,
+            time.perf_counter_ns() - start,
+            exc_info,
+        )

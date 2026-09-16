@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 import threading
 import unittest
 from unittest import mock
@@ -403,6 +404,84 @@ class DjangoMiddlewareModeTests(_DjangoMiddlewareTestCase):
             self.assertEqual("a" * 32, seen["trace_id"])
         finally:
             _modes.state.mode = "full"
+
+
+@unittest.skipIf(django is None, "django is not installed in this environment")
+class DjangoMiddlewareExceptionTests(_DjangoMiddlewareTestCase):
+    """`process_exception` stashes the exception without swallowing it: a
+    raising view still produces Django's own 500 response, and (with the
+    completion event enabled) exactly one ERROR `http.server.request`
+    record carries the real final status and a rendered traceback. No
+    `Proves:` line yet: waits for STANDARDS.md's own HTM-011 entry
+    (phase 5)."""
+
+    middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
+    service_name = "django-exception"
+
+    def setUp(self):
+        super().setUp()
+        # Django's own `django.request` logger propagates to root and
+        # renders the SAME exception instance first, which would consume
+        # `_format._render_exception`'s once-per-instance stacktrace
+        # dedup marker before semlog's own event gets a chance to. Silence
+        # it here so this class proves semlog's OWN mechanism in
+        # isolation, not an incidental interaction with a second,
+        # unrelated logging system.
+        self._django_request_logger = logging.getLogger("django.request")
+        self._django_request_was_disabled = self._django_request_logger.disabled
+        self._django_request_logger.disabled = True
+
+    def tearDown(self):
+        self._django_request_logger.disabled = self._django_request_was_disabled
+        super().tearDown()
+
+    def test_view_exception_produces_one_error_event_with_traceback(self):
+        status, _body = self._wsgi_get("/boom/")
+        self.assertEqual("500 Internal Server Error", status)
+        lines = self._lines()
+        semlog_events = [
+            line for line in lines if line.get("event_name") == "http.server.request"
+        ]
+        self.assertEqual(1, len(semlog_events))
+        record = semlog_events[0]
+        self.assertEqual("ERROR", record["severity_text"])
+        self.assertEqual(500, record["http.response.status_code"])
+        self.assertIn("exception.stacktrace", record)
+        self.assertIn("matrix-boom", record["exception.stacktrace"])
+
+    def test_process_exception_never_swallows_the_response_still_renders(self):
+        status, body = self._wsgi_get("/boom/")
+        self.assertEqual("500 Internal Server Error", status)
+        self.assertTrue(body)  # Django's own rendered 500 body, untouched
+
+
+@unittest.skipIf(django is None, "django is not installed in this environment")
+class DjangoMiddlewareCoexistenceTests(_DjangoMiddlewareTestCase):
+    """Using the class together with `WSGIMiddleware` wrapping the same
+    application is not blocked at runtime: each layer parses the inbound
+    `traceparent` independently and mints its own `span_id`, so with
+    `log_requests=True` on both, two valid `http.server.request` events
+    are emitted per request and neither layer raises. No `Proves:` line
+    yet: waits for STANDARDS.md's own HTM-010 entry (phase 5)."""
+
+    middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
+    service_name = "django-coexistence"
+
+    def test_both_layers_emit_valid_events_sharing_one_trace_id(self):
+        app = WSGIMiddleware(self._wsgi_app(), log_requests=True)
+        env = environ(headers={"traceparent": _TRACE_A}, PATH_INFO="/sync/")
+        start_response = recording_start_response()
+        list(app(env, start_response))
+        self.assertEqual("200 OK", start_response.calls[0][0])
+        events = [
+            line
+            for line in self._lines()
+            if line.get("event_name") == "http.server.request"
+        ]
+        self.assertEqual(2, len(events))
+        self.assertEqual("a" * 32, events[0]["trace_id"])
+        self.assertEqual("a" * 32, events[1]["trace_id"])
+        self.assertNotEqual(events[0]["span_id"], events[1]["span_id"])
 
 
 if __name__ == "__main__":
