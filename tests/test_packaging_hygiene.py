@@ -13,6 +13,7 @@ Conventional Commits convention for commit messages.
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -142,6 +143,103 @@ class Changelog020Tests(unittest.TestCase):
         fixed = _subsection(self.section, "### Fixed")
         self.assertIsNotNone(fixed, "no ### Fixed subsection")
         self.assertTrue(fixed)
+
+
+class Changelog030Tests(unittest.TestCase):
+    """Proves: DOC-013
+
+    CHANGELOG.md's `## [0.3.0]` section: a dated heading, a non-empty
+    `### Added` subsection naming `DjangoMiddleware` and the FastAPI
+    `add_middleware` recipe, and a non-empty `### Changed` subsection for
+    the CP-015/CP-017 amendments; `pyproject.toml` reads `0.3.0`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        cls.section = _changelog_section(cls.text, "## [0.3.0]")
+
+    def test_changelog_has_a_dated_0_3_0_heading(self):
+        self.assertRegex(self.text, r"(?m)^## \[0\.3\.0\] - \d{4}-\d{2}-\d{2}$")
+
+    def test_0_3_0_has_a_non_empty_added_subsection_naming_django_and_fastapi(self):
+        added = _subsection(self.section, "### Added")
+        self.assertIsNotNone(added, "no ### Added subsection")
+        self.assertTrue(added)
+        self.assertIn("DjangoMiddleware", added)
+        self.assertIn("FastAPI", added)
+
+    def test_0_3_0_has_a_non_empty_changed_subsection(self):
+        changed = _subsection(self.section, "### Changed")
+        self.assertIsNotNone(changed, "no ### Changed subsection")
+        self.assertTrue(changed)
+
+    def test_pyproject_reads_0_3_0(self):
+        version, _license = _load_pyproject_project_table()
+        self.assertEqual("0.3.0", version)
+
+    def test_0_3_0_heading_precedes_the_0_2_0_heading(self):
+        # MINOR-C (round 2): DOC-013's own "The prior ## [0.2.0] section
+        # MUST remain, unchanged, BELOW it" clause was unenforced --
+        # swapping the two sections left every other check here green.
+        self.assertLess(
+            self.text.index("## [0.3.0]"),
+            self.text.index("## [0.2.0]"),
+            "## [0.3.0] must appear before ## [0.2.0], newest-first",
+        )
+
+
+class SemlogImportsWithoutDjangoTests(unittest.TestCase):
+    """Proves: CP-008, HTM-008
+
+    Runs in a child interpreter with `django` and `asgiref` blocked by a
+    `sys.meta_path` finder installed before `semlog` is ever imported:
+    `import semlog` must still succeed, `semlog.DjangoMiddleware` must
+    resolve and construct with no Django installed at all, and `django`,
+    `asgiref` and `asyncio` must all stay absent from `sys.modules`
+    afterward -- proving HTM-008's "MUST NOT import django or asgiref at
+    semlog import time" clause end to end, including the lazy
+    coroutine-detection shim inside `DjangoMiddleware.__init__`.
+    Lives here, not in `tests/test_django_matrix.py`: it
+    must run in the **default** suite, where Django is genuinely absent,
+    not inside the `django-matrix` CI job where Django is installed."""
+
+    def test_semlog_imports_and_constructs_django_middleware_without_django(self):
+        src_dir = str(REPO_ROOT / "src")
+        script = f"""
+import sys
+
+
+class _BlockFinder:
+    def find_spec(self, name, path, target=None):
+        blocked = name == "django" or name.startswith("django.")
+        blocked = blocked or name == "asgiref" or name.startswith("asgiref.")
+        if blocked:
+            raise ImportError(f"blocked for this test: {{name}}")
+        return None
+
+
+sys.meta_path.insert(0, _BlockFinder())
+sys.path.insert(0, {src_dir!r})
+
+import semlog
+
+middleware = semlog.DjangoMiddleware(lambda request: request)
+assert middleware is not None
+
+for blocked_name in ("django", "asgiref", "asyncio"):
+    assert blocked_name not in sys.modules, f"{{blocked_name}} was imported"
+
+print("OK")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("OK", result.stdout)
 
 
 class ConventionalCommitsDocumentedTests(unittest.TestCase):

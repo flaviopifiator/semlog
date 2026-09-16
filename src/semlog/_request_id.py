@@ -1,8 +1,7 @@
 """RFC 9562 UUIDv7 request-id generator (STANDARDS §8, TCP-010, design ADR-7).
 
 Delegates to stdlib `uuid.uuid7()` on Python 3.14+; the bundled RFC 9562
-§5.7 fallback for 3.10-3.13 lives in `_uuid7_fallback.py`, excluded from
-the CP-017 source-line budget by filename.
+§5.7 fallback for 3.10-3.13 lives in `_uuid7_fallback.py`.
 """
 
 from __future__ import annotations

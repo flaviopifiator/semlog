@@ -216,9 +216,8 @@ class CaptureLoggersParameterTests(unittest.TestCase):
     `configure(capture_loggers=(...))` removes that logger's own handlers
     and turns propagation on, so its records reach the pipeline `configure()`
     just installed instead of the handler it originally owned. Not tied to
-    a single STANDARDS.md requirement id (same precedent as
-    `tests/test_class_budget.py`/`test_source_budget.py`: no `Proves:` line
-    when no id cleanly backs the behavior)."""
+    a single STANDARDS.md requirement id: carries no `Proves:` line, since
+    no id cleanly backs this specific behavior alone."""
 
     def tearDown(self):
         reset_pipeline()

@@ -1,7 +1,7 @@
 """`configure()`, the library's single entry point (design #162 §3.3/3.4).
 No configuration object (engram #238; CP-015): state lives in one
-module-level `types.SimpleNamespace`, not a class -- a stdlib type never
-counts against the class budget. `current()` returns it directly."""
+module-level `types.SimpleNamespace`, not a class, matching CP-016's flat
+three-stage architecture. `current()` returns it directly."""
 
 from __future__ import annotations
 

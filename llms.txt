@@ -10,12 +10,12 @@ Run `python -m semlog llm` (or call `semlog.llm()` from the installed package) f
 
 ## Docs
 
-- [README](README.md): what semlog is for, installation, quick start, public API, FastAPI/Django recipes, configuration, output example, and compatibility matrix.
+- [README](README.md): what semlog is for, installation, quick start, public API, FastAPI (`ASGIMiddleware` wrapper and `add_middleware`) and Django (`DjangoMiddleware` in `settings.MIDDLEWARE`) recipes, configuration, output example, and compatibility matrix.
 - [STANDARDS](STANDARDS.md): the normative record contract, severity mapping, extension limits, pipeline guarantees, compatibility policy, and references.
 
 ## Agent guide
 
-- [Agent guide](src/semlog/agent_guide.md): the single, self-sufficient English guide for coding agents writing call sites against semlog: public API with signatures, call-site rules, level semantics, the output contract, configuration, FastAPI/Django recipes, and migration/review checklists. Also returned by `semlog.llm()` and `python -m semlog llm`.
+- [Agent guide](src/semlog/agent_guide.md): the single, self-sufficient English guide for coding agents writing call sites against semlog: public API with signatures (including `DjangoMiddleware`), call-site rules, level semantics, the output contract, configuration, FastAPI (`ASGIMiddleware` wrapper and `add_middleware`) and Django (`settings.MIDDLEWARE`) recipes, and migration/review checklists. Also returned by `semlog.llm()` and `python -m semlog llm`.
 
 ## Schemas
 

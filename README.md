@@ -17,7 +17,7 @@
 [![Django 3.2.9+](https://img.shields.io/badge/Django-%E2%89%A5%203.2.9-092E20?logo=django&logoColor=white)](.github/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](pyproject.toml)
-[![Requirements proven: 104/104](https://img.shields.io/badge/requirements%20proven-104%2F104-brightgreen)](STANDARDS.md)
+[![Requirements proven: 110/110](https://img.shields.io/badge/requirements%20proven-110%2F110-brightgreen)](STANDARDS.md)
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
 
 ## Why semlog
@@ -92,13 +92,14 @@ Three rules keep records useful:
 
 ### Public API
 
-semlog exposes exactly eight names. Everything else stays standard `logging`.
+semlog exposes exactly nine names. Everything else stays standard `logging`.
 
 | Name | Use it to |
 |---|---|
 | `configure(...)` | Configure the process once, at startup |
 | `WSGIMiddleware(app)` | Wrap a WSGI application: trace context and `http.request.id` on every record of a request |
 | `ASGIMiddleware(app)` | The same, for an ASGI application |
+| `DjangoMiddleware` | A `settings.MIDDLEWARE` entry serving both sync and async Django views |
 | `operation(headers=None)` | Correlate work outside HTTP, such as jobs, queue consumers and CLI commands |
 | `bind(attributes)` | Add fields to every later record of the current request or operation |
 | `inject(headers, *, trusted=True)` | Propagate trace context to an outbound call |
@@ -144,34 +145,49 @@ def generate_report_sync(report_id: str):
     ...
 ```
 
+Equivalent, using FastAPI's own middleware stack instead of wrapping `app`:
+
+```python
+app = FastAPI()
+app.add_middleware(semlog.ASGIMiddleware, log_requests=True)
+# A global @app.exception_handler(Exception) runs in Starlette's outermost
+# ServerErrorMiddleware, outside semlog's own bound context: its logs carry
+# no trace_id, and the ERROR completion event has no status code. Wrap
+# `app` instead (above) to keep exception handling inside semlog's context.
+```
+
 ### Django
 
-Wrap the WSGI or ASGI entry point, and turn off Django's own logging configuration so it does not replace the root handler that `configure()` installs.
-
-```python
-# wsgi.py
-import semlog
-from django.core.wsgi import get_wsgi_application
-from semlog import WSGIMiddleware
-
-semlog.configure(service_name="my-django-service")
-application = WSGIMiddleware(get_wsgi_application(), log_requests=True)
-```
-
-```python
-# asgi.py
-import semlog
-from django.core.asgi import get_asgi_application
-from semlog import ASGIMiddleware
-
-semlog.configure(service_name="my-django-service")
-application = ASGIMiddleware(get_asgi_application(), log_requests=True)
-```
+Add the class to `settings.MIDDLEWARE`, and call `configure()` from `AppConfig.ready()`, since Django applies its own logging configuration during startup, after `settings.py` is read but before `ready()` runs.
 
 ```python
 # settings.py
-LOGGING_CONFIG = None  # Django must not replace the root handler configure() installs
+MIDDLEWARE = [
+    # ... other middleware ...
+    "semlog.DjangoMiddleware",
+]
 ```
+
+```python
+# apps.py
+import semlog
+from django.apps import AppConfig
+
+
+class MyAppConfig(AppConfig):
+    name = "myapp"
+
+    def ready(self):
+        semlog.configure(service_name="my-django-service")
+```
+
+Placed outermost (first in `MIDDLEWARE`, the default recommendation), it covers every other middleware's own logging, but a competing `process_exception` closer to the view can pre-empt semlog's own hook (see below); placed closer to the view instead, it maximizes exception-capture priority at the cost of narrower context coverage. Pick whichever tradeoff fits the deployment.
+
+`process_exception` stashes an unhandled view exception without swallowing it, so the completion event still carries the real final status and a rendered traceback; Django's own exception handling is never modified. Two permanent limitations, neither a defect: it cannot observe an exception raised by another middleware's own code, since only a view exception ever reaches it, and a competing `process_exception` registered closer to the view can return a response first, pre-empting semlog's own hook for that request entirely.
+
+Using the class together with `WSGIMiddleware` or `ASGIMiddleware` wrapping the same application is unsupported: each layer parses the inbound `traceparent` independently and mints its own `span_id`, so with the completion event enabled on both, telemetry is duplicated. Use exactly one.
+
+The completion event is enabled through the Django setting [`SEMLOG_LOG_REQUESTS`](#semlog_log_requests) instead of a constructor keyword, since Django instantiates a `MIDDLEWARE` entry with a single positional argument.
 
 ## Configuration
 
@@ -240,6 +256,17 @@ Each record is rendered on the calling thread and queued for a single writer thr
 | `overflow="block"` (default) | The call waits for room in the queue; no record is lost | No record may be lost and an occasional wait is acceptable |
 | `overflow="drop"` | The call never waits. At 90% capacity, records below `WARNING` are dropped; the last 10% is reserved for `WARNING`, `ERROR` and `CRITICAL`. Every drop is counted and reported | Application latency matters more than log completeness |
 | `queue=False` | Synchronous write, with no queue and no writer thread | Short scripts, debugging, environments without threads |
+
+### SEMLOG_LOG_REQUESTS
+
+Not a `configure()` parameter, and deliberately kept out of the table above: Django instantiates a `settings.MIDDLEWARE` entry with a single positional argument, so no keyword from `configure()` can reach `DjangoMiddleware.__init__` through `settings.MIDDLEWARE` directly. Set the Django setting instead, to enable [`DjangoMiddleware`](#django)'s own completion event, the same one `WSGIMiddleware`/`ASGIMiddleware` enable through their own `log_requests=True` constructor keyword:
+
+```python
+# settings.py
+SEMLOG_LOG_REQUESTS = True
+```
+
+Default `False`, read once, when Django constructs the middleware. A non-boolean value raises `ValueError` naming the value and its source. It is a single boolean, not a configuration object or dictionary, and it adds no public name.
 
 ## Modes
 

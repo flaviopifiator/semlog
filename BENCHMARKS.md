@@ -2,7 +2,7 @@
 
 This document holds the methodology of semlog's benchmark harness and how to run it. Benchmark results are not published yet: they are being validated, and neither this document nor either README publishes a measured figure until the maintainer validates them (STANDARDS.md CP-005).
 
-The harness lives in [`benchmark/`](benchmark/), outside the published package: it does not count toward the package source budget (STANDARDS.md CP-017) and is not shipped in the wheel. It uses only standard-library measurement tools (`time.perf_counter_ns`, `tracemalloc`, `statistics`, and `cProfile` for a diagnostic mode only), with no third-party benchmark package such as `pyperf` or `pytest-benchmark` (CP-012). It compares semlog with the standard library's `logging` plus a hand-written JSON formatter, with `loguru`, and with `structlog`.
+The harness lives in [`benchmark/`](benchmark/), outside the published package: it is not part of the library's own source tree and is not shipped in the wheel. It uses only standard-library measurement tools (`time.perf_counter_ns`, `tracemalloc`, `statistics`, and `cProfile` for a diagnostic mode only), with no third-party benchmark package such as `pyperf` or `pytest-benchmark` (CP-012). It compares semlog with the standard library's `logging` plus a hand-written JSON formatter, with `loguru`, and with `structlog`.
 
 ## Methodology
 

@@ -677,9 +677,8 @@ class ReadmeConfigureSignatureAntiDriftTests(unittest.TestCase):
     must name exactly the same parameters as the real `configure()`
     signature, in both directions -- every documented parameter is real,
     and every real parameter is documented. Not tied to a single
-    STANDARDS.md requirement id (same precedent as
-    `tests/test_class_budget.py`: no `Proves:` line when no id cleanly
-    backs the check)."""
+    STANDARDS.md requirement id: carries no `Proves:` line, since no id
+    cleanly backs this specific check alone."""
 
     def test_readme_table_matches_configure_signature_in_both_directions(self):
         real = set(inspect.signature(semlog.configure).parameters)

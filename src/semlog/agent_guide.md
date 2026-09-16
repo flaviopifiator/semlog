@@ -8,7 +8,7 @@ The name is `semantic` plus `log`: semlog applies the field names of OpenTelemet
 
 ## Public API
 
-semlog exposes exactly eight public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods. The package ships a PEP 561 `py.typed` marker, so a type checker reads the annotations it carries instead of treating the package as untyped; the signatures below are the authoritative ones.
+semlog exposes exactly nine public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods. The package ships a PEP 561 `py.typed` marker, so a type checker reads the annotations it carries instead of treating the package as untyped; the signatures below are the authoritative ones.
 
 ### configure
 
@@ -63,13 +63,22 @@ class ASGIMiddleware:
 
 The same contract as `WSGIMiddleware`, including `baggage_allow`'s configured-default fallback, for a pure ASGI 3.0 application operating at the `http` scope; it does not depend on `BaseHTTPMiddleware`. The `lifespan` scope passes through untouched, with no header parsing and no context binding.
 
+### DjangoMiddleware
+
+```python
+class DjangoMiddleware:
+    def __init__(self, get_response, *, baggage_allow=None, log_requests=None): ...
+```
+
+A `settings.MIDDLEWARE` entry serving both synchronous and asynchronous Django deployments through exactly one class: parses inbound `traceparent`/`tracestate`/baggage headers, binds a fresh context for the request, and stays correctly bound throughout a `StreamingHttpResponse` body, including on Django's oldest supported release. `baggage_allow` follows the same configured-default fallback as `WSGIMiddleware`/`ASGIMiddleware`. `log_requests=True` additionally emits one `http.server.request` completion event per request; left as `None` (the default), it resolves instead from the Django setting `SEMLOG_LOG_REQUESTS` (default off), because a dotted `MIDDLEWARE` entry cannot receive a keyword argument. `process_exception` stashes an unhandled view exception without swallowing it, so the completion event still carries the real final status and a rendered traceback; see the Django recipe below for placement guidance and this hook's permanent limitations.
+
 ### operation
 
 ```python
 def operation(headers=None, *, baggage_allow=None): ...
 ```
 
-The correlation primitive for non-HTTP work (background jobs, queue consumers, CLI commands); the two middlewares use the same primitive internally. Used as a context manager: `with operation():`. Called with `headers`, it parses them like an inbound HTTP request; `baggage_allow` lists which inbound baggage keys are copied into log attributes, falling back to `configure(baggage_allow=...)`'s default when left as `None`. Called without `headers` while already inside an operation, it starts a child span on the same trace. Called without `headers` outside any operation, it starts a brand new trace.
+The correlation primitive for non-HTTP work (background jobs, queue consumers, CLI commands); the three middlewares use the same primitive internally. Used as a context manager: `with operation():`. Called with `headers`, it parses them like an inbound HTTP request; `baggage_allow` lists which inbound baggage keys are copied into log attributes, falling back to `configure(baggage_allow=...)`'s default when left as `None`. Called without `headers` while already inside an operation, it starts a child span on the same trace. Called without `headers` outside any operation, it starts a brand new trace.
 
 ### bind
 
@@ -281,34 +290,56 @@ def generate_report_sync(report_id: str):
     ...
 ```
 
+Equivalent, using FastAPI's own middleware stack instead of wrapping `app`:
+
+```python
+app = FastAPI()
+app.add_middleware(semlog.ASGIMiddleware, log_requests=True)
+# A global @app.exception_handler(Exception) runs in Starlette's outermost
+# ServerErrorMiddleware, outside semlog's own bound context: its logs carry
+# no trace_id, and the ERROR completion event has no status code. Wrap
+# `app` instead (above) to keep exception handling inside semlog's context.
+```
+
 ## Django recipe
 
-Wrap the WSGI or ASGI entry point, and disable Django's own logging configuration so it does not replace the root handler `configure()` installs.
-
-```python
-# wsgi.py
-import semlog
-from django.core.wsgi import get_wsgi_application
-from semlog import WSGIMiddleware
-
-semlog.configure(service_name="my-django-service")
-application = WSGIMiddleware(get_wsgi_application(), log_requests=True)
-```
-
-```python
-# asgi.py
-import semlog
-from django.core.asgi import get_asgi_application
-from semlog import ASGIMiddleware
-
-semlog.configure(service_name="my-django-service")
-application = ASGIMiddleware(get_asgi_application(), log_requests=True)
-```
+Add the class to `settings.MIDDLEWARE`, and call `configure()` from `AppConfig.ready()`, since Django applies its own logging configuration during startup, after `settings.py` is read but before `ready()` runs.
 
 ```python
 # settings.py
-LOGGING_CONFIG = None  # Django must not replace the root handler configure() installs
+MIDDLEWARE = [
+    # ... other middleware ...
+    "semlog.DjangoMiddleware",
+]
 ```
+
+```python
+# apps.py
+import semlog
+from django.apps import AppConfig
+
+
+class MyAppConfig(AppConfig):
+    name = "myapp"
+
+    def ready(self):
+        semlog.configure(service_name="my-django-service")
+```
+
+Placed outermost (first in `MIDDLEWARE`, the default recommendation), it covers every other middleware's own logging, but a competing `process_exception` closer to the view can pre-empt semlog's own hook; placed closer to the view instead, it maximizes exception-capture priority at the cost of narrower context coverage.
+
+`process_exception` stashes an unhandled view exception without swallowing it, so the completion event still carries the real final status and a rendered traceback; Django's own exception handling is never modified. Two permanent limitations, neither a defect: it cannot observe an exception raised by another middleware's own code, since only a view exception ever reaches it, and a competing `process_exception` registered closer to the view can return a response first, pre-empting semlog's own hook for that request entirely.
+
+Using the class together with `WSGIMiddleware` or `ASGIMiddleware` wrapping the same application is unsupported: each layer parses the inbound `traceparent` independently and mints its own `span_id`, so with the completion event enabled on both, telemetry is duplicated.
+
+The completion event is enabled through the Django setting `SEMLOG_LOG_REQUESTS` (default `False`, read once, when Django constructs the middleware) instead of a constructor keyword, since Django instantiates a `MIDDLEWARE` entry with a single positional argument:
+
+```python
+# settings.py
+SEMLOG_LOG_REQUESTS = True
+```
+
+A non-boolean value raises `ValueError` naming the value and its source. Passing `log_requests=` directly still overrides the setting.
 
 ## When to use each API
 
@@ -316,6 +347,7 @@ LOGGING_CONFIG = None  # Django must not replace the root handler configure() in
 |---|---|---|
 | Starting the process, once | `configure(...)` | At the service entry point, before the application is built |
 | Serving HTTP (WSGI or ASGI) | `WSGIMiddleware` / `ASGIMiddleware` | Wrapping the application once; every request is traced automatically |
+| Serving HTTP with Django | `DjangoMiddleware` | Added once to `settings.MIDDLEWARE`; every request is traced automatically |
 | Logging any event | `logger.info` / `.warning` / `.error` / `.exception` / ... | Any call site, always |
 | Adding a field to every later record in the same request or operation | `bind(attributes)` | At the start of handling, or as soon as the value is known |
 | Calling another service | `inject(headers, trusted=...)` | Immediately before the outbound call |

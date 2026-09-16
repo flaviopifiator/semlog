@@ -17,7 +17,7 @@
 [![Django 3.2.9+](https://img.shields.io/badge/Django-%E2%89%A5%203.2.9-092E20?logo=django&logoColor=white)](.github/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](pyproject.toml)
-[![Requirements proven: 104/104](https://img.shields.io/badge/requirements%20proven-104%2F104-brightgreen)](STANDARDS.md)
+[![Requirements proven: 110/110](https://img.shields.io/badge/requirements%20proven-110%2F110-brightgreen)](STANDARDS.md)
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
 
 ## Por qué semlog
@@ -92,13 +92,14 @@ Tres reglas mantienen útiles los registros:
 
 ### API pública
 
-semlog expone exactamente ocho nombres. Todo lo demás sigue siendo `logging` estándar.
+semlog expone exactamente nueve nombres. Todo lo demás sigue siendo `logging` estándar.
 
 | Nombre | Sirve para |
 |---|---|
 | `configure(...)` | Configurar el proceso una sola vez, al arrancar |
 | `WSGIMiddleware(app)` | Envolver una aplicación WSGI: contexto de traza y `http.request.id` en cada registro de una solicitud |
 | `ASGIMiddleware(app)` | Lo mismo, para una aplicación ASGI |
+| `DjangoMiddleware` | Una entrada de `settings.MIDDLEWARE` que sirve vistas Django tanto síncronas como asíncronas |
 | `operation(headers=None)` | Correlacionar trabajo fuera de HTTP, como jobs, consumidores de colas y comandos de CLI |
 | `bind(attributes)` | Agregar campos a todos los registros posteriores de la solicitud u operación vigente |
 | `inject(headers, *, trusted=True)` | Propagar el contexto de traza a una llamada saliente |
@@ -144,34 +145,49 @@ def generate_report_sync(report_id: str):
     ...
 ```
 
+Equivalente, usando la propia pila de middlewares de FastAPI en lugar de envolver `app`:
+
+```python
+app = FastAPI()
+app.add_middleware(semlog.ASGIMiddleware, log_requests=True)
+# A global @app.exception_handler(Exception) runs in Starlette's outermost
+# ServerErrorMiddleware, outside semlog's own bound context: its logs carry
+# no trace_id, and the ERROR completion event has no status code. Wrap
+# `app` instead (above) to keep exception handling inside semlog's context.
+```
+
 ### Django
 
-Envuelva el punto de entrada WSGI o ASGI y desactive la configuración de logging propia de Django, para que no reemplace el manejador raíz que instala `configure()`.
-
-```python
-# wsgi.py
-import semlog
-from django.core.wsgi import get_wsgi_application
-from semlog import WSGIMiddleware
-
-semlog.configure(service_name="my-django-service")
-application = WSGIMiddleware(get_wsgi_application(), log_requests=True)
-```
-
-```python
-# asgi.py
-import semlog
-from django.core.asgi import get_asgi_application
-from semlog import ASGIMiddleware
-
-semlog.configure(service_name="my-django-service")
-application = ASGIMiddleware(get_asgi_application(), log_requests=True)
-```
+Agregue la clase a `settings.MIDDLEWARE`, y llame a `configure()` desde `AppConfig.ready()`, ya que Django aplica su propia configuración de logging durante el arranque, después de leer `settings.py` pero antes de ejecutar `ready()`.
 
 ```python
 # settings.py
-LOGGING_CONFIG = None  # Django must not replace the root handler configure() installs
+MIDDLEWARE = [
+    # ... other middleware ...
+    "semlog.DjangoMiddleware",
+]
 ```
+
+```python
+# apps.py
+import semlog
+from django.apps import AppConfig
+
+
+class MyAppConfig(AppConfig):
+    name = "myapp"
+
+    def ready(self):
+        semlog.configure(service_name="my-django-service")
+```
+
+Colocada más externa (primera en `MIDDLEWARE`, la recomendación por defecto), cubre el logging propio de cualquier otro middleware, pero un `process_exception` competidor más cercano a la vista puede anticiparse al propio hook de semlog (ver abajo); colocada más cerca de la vista, en cambio, maximiza la prioridad de captura de excepciones a costa de una cobertura de contexto más estrecha. Elija la relación de compromiso que mejor se ajuste al despliegue.
+
+`process_exception` guarda una excepción de vista no manejada sin absorberla, de modo que el evento de finalización sigue llevando el estado final real y una traza renderizada; el manejo de excepciones propio de Django nunca se modifica. Dos limitaciones permanentes, ninguna es un defecto: no puede observar una excepción lanzada por el propio código de otro middleware, ya que solo una excepción de vista llega hasta él, y un `process_exception` competidor registrado más cerca de la vista puede devolver una respuesta primero, anticipándose por completo al propio hook de semlog para esa solicitud.
+
+Usar la clase junto con `WSGIMiddleware` o `ASGIMiddleware` envolviendo la misma aplicación no está soportado: cada capa analiza el `traceparent` entrante de forma independiente y genera su propio `span_id`, de modo que con el evento de finalización habilitado en ambas, la telemetría se duplica. Use solo una.
+
+El evento de finalización se habilita mediante el ajuste de Django [`SEMLOG_LOG_REQUESTS`](#semlog_log_requests) en lugar de una palabra clave del constructor, ya que Django instancia una entrada de `MIDDLEWARE` con un único argumento posicional.
 
 ## Configuración
 
@@ -240,6 +256,17 @@ Cada registro se renderiza en el hilo que hace la llamada y se encola para un ú
 | `overflow="block"` (por defecto) | La llamada espera hasta que haya espacio en la cola; no se pierde ningún registro | No se puede perder ningún registro y una espera ocasional es aceptable |
 | `overflow="drop"` | La llamada nunca espera. Al 90 % de ocupación se descartan los registros por debajo de `WARNING`; el 10 % restante se reserva para `WARNING`, `ERROR` y `CRITICAL`. Cada descarte se cuenta y se reporta | La latencia de la aplicación importa más que la completitud del registro |
 | `queue=False` | Escritura síncrona, sin cola ni hilo escritor | Scripts cortos, depuración, entornos sin hilos |
+
+### SEMLOG_LOG_REQUESTS
+
+No es un parámetro de `configure()`, y se mantiene deliberadamente fuera de la tabla anterior: Django instancia una entrada de `settings.MIDDLEWARE` con un único argumento posicional, así que ninguna palabra clave de `configure()` puede llegar a `DjangoMiddleware.__init__` a través de `settings.MIDDLEWARE` directamente. Configure el ajuste de Django en su lugar, para habilitar el propio evento de finalización de [`DjangoMiddleware`](#django), el mismo que `WSGIMiddleware`/`ASGIMiddleware` habilitan mediante su propia palabra clave del constructor `log_requests=True`:
+
+```python
+# settings.py
+SEMLOG_LOG_REQUESTS = True
+```
+
+Por defecto `False`, se lee una sola vez, cuando Django construye el middleware. Un valor no booleano lanza `ValueError` nombrando el valor y su origen. Es un único booleano, no un objeto ni un diccionario de configuración, y no agrega ningún nombre público.
 
 ## Modos
 
