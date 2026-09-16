@@ -1,7 +1,8 @@
-"""README badge anti-drift checks, for both README editions.
+"""README anti-drift checks, for both README editions: every published
+claim that restates a fact living somewhere else in the repository is
+checked against that source instead of being trusted.
 
-Every badge states a fact that lives somewhere else in the repository, so
-each one is checked against that source instead of being trusted:
+The badges:
 
 - CI: the live GitHub Actions status badge of `.github/workflows/ci.yml`,
   linking to the workflow runs (the honest form of "all tests pass"; no
@@ -17,6 +18,12 @@ each one is checked against that source instead of being trusted:
 - PyPI: the live version badge of the published project, linking to its
   page on PyPI, and never left behind inside an HTML comment.
 
+And the example records: each one is presented as real output, so the
+`telemetry.sdk.version` it shows is checked against the version
+`pyproject.toml` declares, which is what the installed package emits.
+Both editions shipped `"0.2.0"` for a 0.3.0 package before this check
+existed.
+
 Not tied to a single STANDARDS.md requirement id: these checks keep
 published claims consistent with the sources that other tests already
 prove, so no id cleanly backs them alone.
@@ -24,13 +31,20 @@ prove, so no id cleanly backs them alone.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import unittest
 import urllib.parse
 from pathlib import Path
 
-from ._readme_support import READMES, badges, commented_badges, readme_text
+from ._readme_support import (
+    READMES,
+    badges,
+    commented_badges,
+    fenced_blocks,
+    readme_text,
+)
 from .test_traceability import (
     STANDARDS_PATH,
     TESTS_DIR,
@@ -114,6 +128,31 @@ def pyproject_license_and_dependency_count():
     license_expr = re.search(r'(?m)^license = "([^"]+)"', text).group(1)
     dependencies = re.search(r"(?m)^dependencies\s*=\s*\[([^\]]*)\]", text).group(1)
     return license_expr, len(re.findall(r'"[^"]+"', dependencies))
+
+
+def pyproject_version():
+    """The version `pyproject.toml` declares, read with a regex so this
+    works on 3.10 too (no `tomllib`), matching this module's own
+    `pyproject_license_and_dependency_count` fallback."""
+    text = PYPROJECT_PATH.read_text(encoding="utf-8")
+    return re.search(r'(?m)^version = "([^"]+)"', text).group(1)
+
+
+def example_record_sdk_versions(text):
+    """Every `telemetry.sdk.version` value shown in a fenced `json` block
+    of `text`, in order (empty when no block shows one)."""
+    versions = []
+    for info, content in fenced_blocks(text):
+        if info != "json":
+            continue
+        try:
+            record = json.loads(content)
+        except json.JSONDecodeError:  # pragma: no cover -- caught below
+            versions.append(None)
+            continue
+        if "telemetry.sdk.version" in record:
+            versions.append(record["telemetry.sdk.version"])
+    return versions
 
 
 def requirements_counts():
@@ -200,6 +239,19 @@ class ReadmeBadgeFactTests(unittest.TestCase):
                 )
 
 
+class ReadmeExampleRecordFactTests(unittest.TestCase):
+    """The example records are presented as real output, so the version
+    they show is the version the installed package emits."""
+
+    def test_example_records_show_the_packaged_version(self):
+        version = pyproject_version()
+        for language in READMES:
+            with self.subTest(language=language):
+                shown = example_record_sdk_versions(readme_text(language))
+                self.assertGreater(len(shown), 0, "no example record shows a version")
+                self.assertEqual([version] * len(shown), shown)
+
+
 class ReadmeBadgePerturbationTests(unittest.TestCase):
     """Each badge check fails against a deliberately broken in-memory copy
     of the real README text, never against the files on disk."""
@@ -246,6 +298,16 @@ class ReadmeBadgePerturbationTests(unittest.TestCase):
         self.assertNotEqual(mutated, self.text)
         images = [image for _alt, image, _link in commented_badges(mutated)]
         self.assertTrue(any("coverage" in image for image in images), images)
+
+    def test_a_stale_example_record_version_is_caught(self):
+        version = pyproject_version()
+        mutated = self.text.replace(
+            f'"telemetry.sdk.version":"{version}"',
+            '"telemetry.sdk.version":"0.0.1"',
+            1,
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn("0.0.1", example_record_sdk_versions(mutated))
 
     def test_shields_static_parsing_undoes_the_escaping(self):
         self.assertEqual(
