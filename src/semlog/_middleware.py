@@ -214,6 +214,32 @@ class ASGIMiddleware:
             pop(token)
 
 
+def _django_log_requests():
+    """`SEMLOG_LOG_REQUESTS` (design D6/D7/D8/D9): default `False`, read
+    once per instance at construction. Never raises for a missing or
+    unconfigured settings object, or for Django being entirely absent
+    (an unconfigured `LazySettings` raises `ImproperlyConfigured`, not
+    `AttributeError`, so a bare `getattr` default would NOT cover it);
+    raises `ValueError` naming the value and its source only for a real
+    value of the wrong type -- truthiness (`"false"`, `1`) is rejected on
+    purpose, matching `_modes.resolve_mode`'s existing precedent."""
+    try:
+        from django.conf import settings  # lazy: never at semlog import time
+
+        value = getattr(settings, "SEMLOG_LOG_REQUESTS", False)
+    except Exception:  # noqa: BLE001 -- unconfigured settings, or no Django
+        return False
+    if not isinstance(value, bool):
+        # ValueError, not TypeError (TRY004): matches this file's own
+        # `_modes.resolve_mode` precedent for an invalid config-sourced
+        # value naming both the value and its source.
+        raise ValueError(  # noqa: TRY004
+            f"SEMLOG_LOG_REQUESTS must be a bool, got {value!r} "
+            "from the Django settings"
+        )
+    return value
+
+
 def _stream_in_scope(iterable, snapshot, on_complete):
     """Rebind target for a synchronous `StreamingHttpResponse` body
     (HTM-013): re-pushes `snapshot` at the first `next()`, not at
@@ -256,11 +282,13 @@ class DjangoMiddleware:
     def __init__(self, get_response, *, baggage_allow=None, log_requests=None):
         self.get_response = get_response
         self._baggage_allow = baggage_allow
-        # Resolution from the `SEMLOG_LOG_REQUESTS` Django setting, and the
-        # event this flag enables, both land in a later work unit; a plain
-        # falsy default keeps the constructor's full signature (design's
-        # interface) without behaving on it yet.
-        self._log_requests = bool(log_requests)
+        # Precedence (design D7, mirrors `baggage_allow`'s own existing
+        # `None`-means-fall-back-to-process-wide-default pattern in this
+        # same file): an explicit keyword always wins; `None` resolves
+        # from the `SEMLOG_LOG_REQUESTS` Django setting, once, here.
+        self._log_requests = (
+            log_requests if log_requests is not None else _django_log_requests()
+        )
         # HTM-008: `asyncio`/`inspect` are imported lazily here, never at
         # `semlog` import time (design D2), so `import semlog` stays free
         # of both even when Django itself is entirely absent.

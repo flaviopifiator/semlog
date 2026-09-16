@@ -29,6 +29,9 @@ import asyncio
 import inspect
 import json
 import logging
+import os
+import subprocess
+import sys
 import threading
 import unittest
 from unittest import mock
@@ -623,6 +626,111 @@ class DjangoMiddlewareFileResponseTests(_DjangoMiddlewareTestCase):
             response.streaming_content = (chunk for chunk in response.streaming_content)
             self.assertIsNone(response.file_to_stream)
             response.close()
+
+
+@unittest.skipIf(django is None, "django is not installed in this environment")
+class DjangoLogRequestsSettingTests(_DjangoMiddlewareTestCase):
+    """`SEMLOG_LOG_REQUESTS` reaches the class through the constraint that
+    a dotted `settings.MIDDLEWARE` entry only ever receives one
+    positional argument (design D6): `True` emits exactly one completion
+    event per request, sync WSGI and async ASGI; `False` and absent emit
+    none; a non-boolean value raises `ValueError` naming the value and
+    its source; an explicit `log_requests=` keyword still wins; and `off`
+    mode ignores the setting entirely. No `Proves:` line yet: waits for
+    STANDARDS.md's own HTM-011 entry (phase 5)."""
+
+    service_name = "django-log-requests-setting"
+
+    def _events(self):
+        return [
+            line
+            for line in self._lines()
+            if line.get("event_name") == "http.server.request"
+        ]
+
+    def test_setting_true_emits_one_event_over_wsgi_and_over_asgi(self):
+        from django.test import override_settings
+
+        with override_settings(SEMLOG_LOG_REQUESTS=True):
+            wsgi_status, _body = self._wsgi_get("/sync/")
+            asgi_status, _body2 = self._asgi_get("/sync/")
+        self.assertEqual("200 OK", wsgi_status)
+        self.assertEqual(200, asgi_status)
+        self.assertEqual(2, len(self._events()))
+
+    def test_setting_false_emits_nothing(self):
+        from django.test import override_settings
+
+        with override_settings(SEMLOG_LOG_REQUESTS=False):
+            self._wsgi_get("/sync/")
+        self.assertEqual(0, len(self._events()))
+
+    def test_setting_absent_emits_nothing(self):
+        self._wsgi_get("/sync/")
+        self.assertEqual(0, len(self._events()))
+
+    def test_non_bool_value_raises_value_error_naming_value_and_source(self):
+        from django.test import override_settings
+
+        with (
+            override_settings(SEMLOG_LOG_REQUESTS="true"),
+            self.assertRaises(ValueError) as cm,
+        ):
+            self._wsgi_app()  # load_middleware() constructs DjangoMiddleware
+        message = str(cm.exception)
+        self.assertIn("'true'", message)
+        self.assertIn("Django settings", message)
+
+    def test_explicit_keyword_wins_over_the_setting(self):
+        from django.test import override_settings
+
+        from semlog import DjangoMiddleware
+
+        with override_settings(SEMLOG_LOG_REQUESTS=True):
+            mw = DjangoMiddleware(lambda request: None, log_requests=False)
+        self.assertFalse(mw._log_requests)
+
+    def test_off_mode_ignores_the_setting_entirely(self):
+        from django.test import override_settings
+
+        from semlog import _modes
+
+        _modes.state.mode = "off"
+        try:
+            with override_settings(SEMLOG_LOG_REQUESTS=True):
+                self._wsgi_get("/sync/")
+            self.assertEqual(0, len(self._events()))
+        finally:
+            _modes.state.mode = "full"
+
+    def test_unconfigured_settings_resolve_to_false_without_raising(self):
+        # design D9: an unconfigured LazySettings raises ImproperlyConfigured
+        # from django.conf, not AttributeError, so a bare getattr default
+        # does not cover it -- only a guard broad enough to catch it does.
+        # A child interpreter with Django genuinely importable but its
+        # settings never configured (no configure() call, no
+        # DJANGO_SETTINGS_MODULE) proves this half of the guard directly:
+        # narrowing the guard to `except ImportError` alone would let
+        # ImproperlyConfigured escape uncaught right here.
+        script = """
+import django  # noqa: F401 -- proves Django is genuinely importable here
+import semlog
+
+middleware = semlog.DjangoMiddleware(lambda request: request)
+assert middleware._log_requests is False, middleware._log_requests
+print("OK")
+"""
+        env = {k: v for k, v in os.environ.items() if k != "DJANGO_SETTINGS_MODULE"}
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+            env=env,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("OK", result.stdout)
 
 
 if __name__ == "__main__":
