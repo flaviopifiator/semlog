@@ -26,6 +26,7 @@ from ._readme_support import (
     readme_text,
     section,
 )
+from .test_traceability import STANDARDS_PATH, parse_standards
 
 
 def configure_table_params(text, title):
@@ -182,7 +183,7 @@ class ReadmeParityPerturbationTests(unittest.TestCase):
         self.assertNotEqual(_badge_set(self.english), _badge_set(mutated))
 
 
-_OPENING_H2_KEYS = ("why", "installation", "name", "quick_start")
+_OPENING_H2_KEYS = ("what", "why", "philosophy", "installation", "quick_start")
 _SUMMARY_LINE_RE = re.compile(r"^\*\*\S.*\.\*\*$")
 # The two differentiators, as the ordered technical tokens that carry them:
 # the adoption story first (`hybrid`, the `semlog=True` keyword it needs, and
@@ -201,17 +202,50 @@ _INSTALL_COMMAND = "pip install semlog"
 # semlog` contains `pip install semlog`, so a substring check stays green
 # even when the plain `pip` instruction is gone.
 _INSTALL_BLOCK = ("bash", _INSTALL_COMMAND)
-# The name explanation: the two word parts, and the specification the name
-# refers to. All four stay untranslated in the Spanish edition, being code
-# spans and a proper noun.
+# The opening section's own job: say what semlog does, in the same terms
+# that explain the name. The two word parts and the specification the name
+# refers to all stay untranslated in the Spanish edition, being code spans
+# and a proper noun.
 _NAME_TOKENS = ("`semantic`", "`log`", "OpenTelemetry", "Semantic Conventions")
-# The one prose fact of the name section that IS translated, so it is looked
-# up per language (same precedent as `_SEARCH_DIRECTION_PHRASES` below): a
-# mutation applied IDENTICALLY to both editions defeats cross-file parity
-# alone, since the parity checks only compare one edition against the other.
+# The two prose facts of the opening section that ARE translated, so they
+# are looked up per language (same precedent as `_SEARCH_DIRECTION_PHRASES`
+# below): a mutation applied IDENTICALLY to both editions defeats cross-file
+# parity alone, since the parity checks only compare one edition against the
+# other. The first is why a named field beats message text; the second is
+# what the library actually does, the fact that used to sit three sections
+# further down.
 _NAME_RATIONALE_PHRASES = {
     "en": "stable name and a stable meaning",
     "es": "nombre y un significado estables",
+}
+_WHAT_IT_DOES_PHRASES = {
+    "en": "decides what every resulting record looks like",
+    "es": "define la forma de cada registro resultante",
+}
+# Philosophy: one language-neutral technical token per stated position, so
+# a section that drops a position cannot stay green. Presence only, never
+# order: unlike the two differentiators, the positions are not ranked.
+_PHILOSOPHY_TOKENS = (
+    "`schemas/log-record.schema.json`",
+    "`Requires-Dist`",
+    "`logging.getLogger(__name__)`",
+    "`hybrid`",
+    "`SEMLOG_MODE=off`",
+    "Semantic Conventions",
+    "W3C Trace Context",
+    "`python -m semlog llm`",
+)
+# The two philosophy claims carried by prose alone, per language.
+_PHILOSOPHY_PHRASES = {
+    "en": ("major version change", "at least one test that cites it"),
+    "es": ("cambio de versión mayor", "al menos una prueba que lo cita"),
+}
+# "STANDARDS.md declares N requirements" / "STANDARDS.md declara N
+# requisitos": N is checked against the real declaration count, never
+# trusted, the same way `tests/test_readme_badges.py` checks the badge.
+_REQUIREMENT_COUNT_RES = {
+    "en": re.compile(r"declares (\d+) requirements"),
+    "es": re.compile(r"declara (\d+) requisitos"),
 }
 
 _MODE_BULLET_MARKERS = ("- **`full`**:", "- **`hybrid`**:", "- **`off`**:")
@@ -241,12 +275,13 @@ def opening_problems(text, language):
     when it answers all three).
 
     The order is the check: a reader who has to scroll past a
-    configuration table to learn what the project does has already left.
-    So the H1 is followed immediately by a one-line summary, the first
-    four level-two sections are the "why", the install instructions, the
-    name explanation and the quick start, and the "why" section states the
-    two differentiators in a fixed order. Scoped to the relevant section
-    span via `section()`, never a whole-document `in` check, so an
+    configuration table to learn what the project does has already left,
+    and so has one who has to scroll past install instructions. So the H1
+    is followed immediately by a one-line summary, the first five
+    level-two sections are what semlog is, the "why", the philosophy, the
+    install instructions and the quick start, and the "why" section states
+    the two differentiators in a fixed order. Scoped to the relevant
+    section span via `section()`, never a whole-document `in` check, so an
     unrelated mention of the same token elsewhere in a 20+ KB document
     cannot satisfy it.
     """
@@ -289,21 +324,61 @@ def opening_problems(text, language):
     return problems
 
 
-def name_section_problems(text, language):
-    """Every way a README's name section fails to explain where the name
-    comes from and why that matters (empty when it explains both)."""
+def what_section_problems(text, language):
+    """Every way a README's opening section fails to say what semlog does,
+    where its name comes from and why that matters (empty when it says all
+    three)."""
     labels = READMES[language]
     try:
-        name_text = section(text, 2, labels["name"])
+        what_text = section(text, 2, labels["what"])
     except ValueError:
-        return ["no name section"]
+        return ["no what-semlog-is section"]
     problems = [
         f"missing name-explanation token {token!r}"
         for token in _NAME_TOKENS
-        if token not in name_text
+        if token not in what_text
     ]
-    if _NAME_RATIONALE_PHRASES[language] not in name_text:
+    if _NAME_RATIONALE_PHRASES[language] not in what_text:
         problems.append("missing stable-meaning rationale")
+    if _WHAT_IT_DOES_PHRASES[language] not in what_text:
+        problems.append("missing what-semlog-does statement")
+    return problems
+
+
+def declared_requirement_count():
+    """How many requirement IDs STANDARDS.md declares, counted with the
+    traceability checker's own parser (`tests/test_traceability.py`), the
+    same source `tests/test_readme_badges.py` checks the badge against."""
+    standards = parse_standards(STANDARDS_PATH.read_text(encoding="utf-8"))
+    return len(standards.declarations)
+
+
+def philosophy_problems(text, language):
+    """Every way a README's philosophy section fails to state the project's
+    positions and to state the requirement count correctly (empty when it
+    states all of them). Scoped to the section's own span, never a
+    whole-document check: every token below also appears somewhere else in
+    a 20+ KB document, so an unscoped check would be vacuous."""
+    labels = READMES[language]
+    try:
+        philosophy_text = section(text, 2, labels["philosophy"])
+    except ValueError:
+        return ["no Philosophy section"]
+    problems = [
+        f"missing philosophy token {token!r}"
+        for token in _PHILOSOPHY_TOKENS
+        if token not in philosophy_text
+    ]
+    problems += [
+        f"missing philosophy phrase {phrase!r}"
+        for phrase in _PHILOSOPHY_PHRASES[language]
+        if phrase not in philosophy_text
+    ]
+    match = _REQUIREMENT_COUNT_RES[language].search(philosophy_text)
+    if match is None:
+        problems.append("no stated requirement count")
+    elif int(match.group(1)) != declared_requirement_count():
+        problems.append(f"stated requirement count {match.group(1)} is stale")
     return problems
 
 
@@ -376,6 +451,70 @@ def modes_narrative_problems(text, language):
     return problems
 
 
+# The root-level trap, as the tokens that carry it: hybrid leaves the root
+# logger's level alone (LP-010), the standard library's default for it is
+# `WARNING`, and the completion event is INFO, so it is filtered out before
+# hybrid's routing ever runs. `configure(level=` is required too: it is the
+# knob a reader would reach for first, and it is exactly the one that does
+# nothing here.
+_ROOT_LEVEL_TOKENS = (
+    "`WARNING`",
+    "`INFO`",
+    "`http.server.request`",
+    "`semlog=True`",
+    "configure(level=",
+)
+_ROOT_LEVEL_FIX = "logging.getLogger().setLevel(logging.INFO)"
+_ROOT_LEVEL_PHRASES = {
+    "en": (
+        "the standard library leaves it at",
+        "set the root level in the application",
+    ),
+    "es": (
+        "la biblioteca estándar lo deja en",
+        "defina el nivel del logger raíz en la aplicación",
+    ),
+}
+
+
+def hybrid_root_level_problems(text, language):
+    """Every way `text`'s root-level subsection under "## Modes"/"## Modos"
+    fails to document the measured `hybrid` trap: with the root logger left
+    at the standard library's default `WARNING`, the INFO completion event
+    and every INFO `semlog=True` call are filtered out before hybrid's own
+    routing runs, and `configure(level=...)` does not change that (empty
+    when it documents all of it). Scoped to the subsection's own span:
+    `WARNING`, `INFO` and `http.server.request` all appear elsewhere in a
+    20+ KB document, so an unscoped check would be vacuous."""
+    labels = READMES[language]
+    try:
+        modes_text = section(text, 2, labels["modes"])
+    except ValueError:
+        return ["no Modes section"]
+    try:
+        root_level_text = section(modes_text, 3, labels["root_level"])
+    except ValueError:
+        return ["no root-logger-level subsection"]
+
+    problems = [
+        f"missing root-level token {token!r}"
+        for token in _ROOT_LEVEL_TOKENS
+        if token not in root_level_text
+    ]
+    problems += [
+        f"missing root-level phrase {phrase!r}"
+        for phrase in _ROOT_LEVEL_PHRASES[language]
+        if phrase not in root_level_text
+    ]
+    if not any(
+        _ROOT_LEVEL_FIX in content
+        for info, content in fenced_blocks(root_level_text)
+        if info == "python"
+    ):
+        problems.append("no python block showing the root-level fix")
+    return problems
+
+
 def env_var_table_problems(text, language):
     """Every way `text`'s "### Precedence and environment variables"/
     "### Precedencia y variables de entorno" subsection fails to keep the
@@ -398,12 +537,12 @@ def env_var_table_problems(text, language):
 
 class ReadmeOpeningParityTests(unittest.TestCase):
     """The first screen of both editions: a one-line summary under the H1,
-    the two differentiators in order, and the install command, followed by
-    the section that explains where the name comes from. Not tied to a
-    single STANDARDS.md requirement id (same precedent as
-    `tests/test_class_budget.py`), so no `Proves:` line: DOC-002's parity
-    is proven above, and no requirement governs the order in which a
-    README introduces the project."""
+    a section that says what semlog is before anything else, the two
+    differentiators in order, the project's philosophy, and the install
+    command. Not tied to a single STANDARDS.md requirement id (same
+    precedent as `tests/test_class_budget.py`), so no `Proves:` line:
+    DOC-002's parity is proven above, and no requirement governs the order
+    in which a README introduces the project."""
 
     @classmethod
     def setUpClass(cls):
@@ -414,17 +553,22 @@ class ReadmeOpeningParityTests(unittest.TestCase):
             with self.subTest(language=language):
                 self.assertEqual([], opening_problems(text, language))
 
-    def test_both_editions_explain_the_name(self):
+    def test_both_editions_say_what_semlog_is_and_explain_the_name(self):
         for language, text in self.texts.items():
             with self.subTest(language=language):
-                self.assertEqual([], name_section_problems(text, language))
+                self.assertEqual([], what_section_problems(text, language))
+
+    def test_both_editions_state_the_philosophy(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertEqual([], philosophy_problems(text, language))
 
 
 class ReadmeOpeningPerturbationTests(unittest.TestCase):
-    """Every check `opening_problems` and `name_section_problems` performs
-    is demonstrated here to be capable of failing, against deliberately
-    broken in-memory copies of the real README text. The real files are
-    never written to."""
+    """Every check `opening_problems`, `what_section_problems` and
+    `philosophy_problems` performs is demonstrated here to be capable of
+    failing, against deliberately broken in-memory copies of the real
+    README text. The real files are never written to."""
 
     @classmethod
     def setUpClass(cls):
@@ -433,7 +577,8 @@ class ReadmeOpeningPerturbationTests(unittest.TestCase):
 
     def test_baseline_has_no_problems(self):
         self.assertEqual([], opening_problems(self.english, "en"))
-        self.assertEqual([], name_section_problems(self.english, "en"))
+        self.assertEqual([], what_section_problems(self.english, "en"))
+        self.assertEqual([], philosophy_problems(self.english, "en"))
 
     def test_a_missing_one_line_summary_is_caught(self):
         summary = next(
@@ -451,6 +596,17 @@ class ReadmeOpeningPerturbationTests(unittest.TestCase):
         # are useless to a reader who does not yet know what the project is.
         mutated = self.english.replace("## Installation", "## Aardvark", 1).replace(
             "## Why semlog", "## Installation", 1
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = opening_problems(mutated, "en")
+        self.assertTrue(any("opening sections are" in p for p in problems), problems)
+
+    def test_the_what_section_pushed_below_the_quick_start_is_caught(self):
+        # The regression the reordering exists for: the explanation of what
+        # semlog does used to sit three sections down, after the reader had
+        # already been asked to install it.
+        mutated = self.english.replace("## What semlog is", "## Aardvark", 1).replace(
+            "## Quick start", "## What semlog is", 1
         )
         self.assertNotEqual(mutated, self.english)
         problems = opening_problems(mutated, "en")
@@ -495,19 +651,21 @@ class ReadmeOpeningPerturbationTests(unittest.TestCase):
             opening_problems(mutated, "en"),
         )
 
-    def test_deleting_the_name_section_entirely_is_caught(self):
-        start = self.english.index("## What the name means")
-        end = self.english.index("## Quick start")
+    def test_deleting_the_what_section_entirely_is_caught(self):
+        start = self.english.index("## What semlog is")
+        end = self.english.index("## Why semlog")
         mutated = self.english[:start] + self.english[end:]
         self.assertNotEqual(mutated, self.english)
-        self.assertEqual(["no name section"], name_section_problems(mutated, "en"))
+        self.assertEqual(
+            ["no what-semlog-is section"], what_section_problems(mutated, "en")
+        )
 
-    def test_a_name_section_that_drops_the_specification_is_caught(self):
+    def test_a_what_section_that_drops_the_specification_is_caught(self):
         mutated = self.english.replace("Semantic Conventions", "conventions")
         self.assertNotEqual(mutated, self.english)
         self.assertIn(
             "missing name-explanation token 'Semantic Conventions'",
-            name_section_problems(mutated, "en"),
+            what_section_problems(mutated, "en"),
         )
 
     def test_name_rationale_mutated_identically_in_both_editions_is_caught(self):
@@ -518,11 +676,82 @@ class ReadmeOpeningPerturbationTests(unittest.TestCase):
         self.assertNotEqual(mutated_en, self.english)
         self.assertNotEqual(mutated_es, self.spanish)
         self.assertIn(
-            "missing stable-meaning rationale", name_section_problems(mutated_en, "en")
+            "missing stable-meaning rationale", what_section_problems(mutated_en, "en")
         )
         self.assertIn(
-            "missing stable-meaning rationale", name_section_problems(mutated_es, "es")
+            "missing stable-meaning rationale", what_section_problems(mutated_es, "es")
         )
+
+    def test_what_it_does_mutated_identically_in_both_editions_is_caught(self):
+        mutated_en = self.english.replace(_WHAT_IT_DOES_PHRASES["en"], "is nice", 1)
+        mutated_es = self.spanish.replace(_WHAT_IT_DOES_PHRASES["es"], "es lindo", 1)
+        self.assertNotEqual(mutated_en, self.english)
+        self.assertNotEqual(mutated_es, self.spanish)
+        self.assertIn(
+            "missing what-semlog-does statement",
+            what_section_problems(mutated_en, "en"),
+        )
+        self.assertIn(
+            "missing what-semlog-does statement",
+            what_section_problems(mutated_es, "es"),
+        )
+
+    def test_deleting_the_philosophy_section_entirely_is_caught(self):
+        start = self.english.index("## Philosophy")
+        end = self.english.index("## Installation")
+        mutated = self.english[:start] + self.english[end:]
+        self.assertNotEqual(mutated, self.english)
+        self.assertEqual(["no Philosophy section"], philosophy_problems(mutated, "en"))
+
+    def test_a_dropped_philosophy_position_is_caught(self):
+        philosophy = section(self.english, 2, "Philosophy")
+        bullet = next(
+            line
+            for line in philosophy.splitlines()
+            if line.startswith("- ") and "`Requires-Dist`" in line
+        )
+        mutated = self.english.replace(bullet + "\n", "", 1)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing philosophy token '`Requires-Dist`'",
+            philosophy_problems(mutated, "en"),
+        )
+
+    def test_a_philosophy_phrase_mutated_identically_in_both_editions_is_caught(self):
+        mutated_en = self.english.replace(
+            "major version change", "patch version change", 1
+        )
+        mutated_es = self.spanish.replace(
+            "cambio de versión mayor", "cambio de versión de parche", 1
+        )
+        self.assertNotEqual(mutated_en, self.english)
+        self.assertNotEqual(mutated_es, self.spanish)
+        self.assertIn(
+            "missing philosophy phrase 'major version change'",
+            philosophy_problems(mutated_en, "en"),
+        )
+        self.assertIn(
+            "missing philosophy phrase 'cambio de versión mayor'",
+            philosophy_problems(mutated_es, "es"),
+        )
+
+    def test_a_stale_requirement_count_is_caught(self):
+        real = declared_requirement_count()
+        for language, replacement in (
+            (
+                "en",
+                (f"declares {real} requirements", f"declares {real - 1} requirements"),
+            ),
+            ("es", (f"declara {real} requisitos", f"declara {real - 1} requisitos")),
+        ):
+            original = readme_text(language)
+            mutated = original.replace(*replacement, 1)
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    f"stated requirement count {real - 1} is stale",
+                    philosophy_problems(mutated, language),
+                )
 
 
 class ReadmeModesParityTests(unittest.TestCase):
@@ -557,6 +786,93 @@ class ReadmeModesParityTests(unittest.TestCase):
         for language, text in self.texts.items():
             with self.subTest(language=language):
                 self.assertEqual([], env_var_table_problems(text, language))
+
+
+class ReadmeHybridRootLevelTests(unittest.TestCase):
+    """DOC-012's root-level topic, in both editions: `hybrid` deliberately
+    leaves the root logger's level as it found it (LP-010), the standard
+    library's default for that level is `WARNING`, and severity filtering
+    for a marked call follows the standard library's effective-level rules
+    (LM-003), so an INFO record is dropped before hybrid's routing runs.
+    Section-scoped through `hybrid_root_level_problems`, never a
+    whole-file token check.
+
+    Proves: DOC-012
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.texts = {language: readme_text(language) for language in READMES}
+
+    def test_both_editions_document_the_hybrid_root_level_trap(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertEqual([], hybrid_root_level_problems(text, language))
+
+
+class ReadmeHybridRootLevelPerturbationTests(unittest.TestCase):
+    """Every check `hybrid_root_level_problems` performs is demonstrated
+    here to be capable of failing, against deliberately broken in-memory
+    copies of the real README text. The real files are never written to."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.english = readme_text("en")
+        cls.spanish = readme_text("es")
+
+    def test_baseline_has_no_problems(self):
+        self.assertEqual([], hybrid_root_level_problems(self.english, "en"))
+        self.assertEqual([], hybrid_root_level_problems(self.spanish, "es"))
+
+    def test_deleting_the_subsection_entirely_is_caught(self):
+        for language, title in (
+            ("en", READMES["en"]["root_level"]),
+            ("es", READMES["es"]["root_level"]),
+        ):
+            original = readme_text(language)
+            body = section(original, 2, READMES[language]["modes"])
+            subsection = section(body, 3, title)
+            mutated = original.replace(subsection + "\n", "", 1)
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertEqual(
+                    ["no root-logger-level subsection"],
+                    hybrid_root_level_problems(mutated, language),
+                )
+
+    def test_dropping_the_configure_level_token_is_caught(self):
+        mutated = self.english.replace("configure(level=", "the level parameter")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing root-level token 'configure(level='",
+            hybrid_root_level_problems(mutated, "en"),
+        )
+
+    def test_dropping_the_fix_block_is_caught(self):
+        mutated = self.english.replace(_ROOT_LEVEL_FIX, "pass", 1)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "no python block showing the root-level fix",
+            hybrid_root_level_problems(mutated, "en"),
+        )
+
+    def test_a_root_level_phrase_mutated_identically_in_both_editions_is_caught(self):
+        mutated_en = self.english.replace(
+            _ROOT_LEVEL_PHRASES["en"][0], "the library raises it to", 1
+        )
+        mutated_es = self.spanish.replace(
+            _ROOT_LEVEL_PHRASES["es"][0], "la biblioteca lo sube a", 1
+        )
+        self.assertNotEqual(mutated_en, self.english)
+        self.assertNotEqual(mutated_es, self.spanish)
+        self.assertIn(
+            f"missing root-level phrase {_ROOT_LEVEL_PHRASES['en'][0]!r}",
+            hybrid_root_level_problems(mutated_en, "en"),
+        )
+        self.assertIn(
+            f"missing root-level phrase {_ROOT_LEVEL_PHRASES['es'][0]!r}",
+            hybrid_root_level_problems(mutated_es, "es"),
+        )
 
 
 class ReadmeModesPerturbationTests(unittest.TestCase):
@@ -771,9 +1087,47 @@ class ReadmeModesPerturbationTests(unittest.TestCase):
         )
 
 
-_FRAMEWORK_RECIPES_TITLES = {
-    "en": "Framework recipes",
-    "es": "Recetas para frameworks",
+# Every integration route the library actually supports, as the call that
+# carries it. A README that documents one route per framework leaves the
+# reader to guess whether the other one is supported at all, so each is
+# required by name, inside its own framework subsection.
+_FASTAPI_ROUTE_MARKERS = (
+    "app.add_middleware(semlog.ASGIMiddleware, log_requests=True)",
+    "ASGIMiddleware(app, log_requests=True)",
+)
+_DJANGO_ROUTE_MARKERS = (
+    '"semlog.DjangoMiddleware"',
+    "get_wsgi_application()",
+    "get_asgi_application()",
+    "WSGIMiddleware",
+    "ASGIMiddleware",
+    # The wrapper route imports `semlog` before Django reads its settings,
+    # so a project `LOGGING` dictionary without this key disables the
+    # completion event's own logger and the event vanishes silently.
+    "disable_existing_loggers",
+)
+# Choosing between two supported routes is the part a reader cannot
+# reconstruct from the examples alone, so each framework subsection must
+# say it in prose (translated, hence per language).
+_ROUTE_CHOICE_PHRASES = {
+    "en": ("Which one to choose", "Which one to use"),
+    "es": ("Cuál elegir", "Cuál usar"),
+}
+# The measured limit of the Django wrapper route: Django's own exception
+# handling has already produced the 500 response by the time a WSGI/ASGI
+# wrapper sees the request, so the wrapper has no exception to render.
+_DJANGO_WRAPPER_LIMIT_PHRASES = {
+    "en": (
+        "converts a view exception into a 500 response before the wrapper sees it",
+        "cannot attach the traceback",
+    ),
+    "es": (
+        (
+            "convierte una excepción de vista en una respuesta 500 antes de que el "
+            "middleware que la envuelve pueda verla"
+        ),
+        "no puede adjuntar la traza",
+    ),
 }
 _DJANGO_PLACEMENT_MARKERS = {
     "en": (
@@ -815,15 +1169,18 @@ _DJANGO_COEXISTENCE_MARKERS = {
 
 def framework_recipes_narrative_problems(text, language):
     """Every way `text`'s "## Framework recipes"/"## Recetas para
-    frameworks" section fails to prove HTM-009's placement/tradeoff
-    narrative, HTM-010's unsupported-coexistence note, HTM-011/HTM-012's
-    process_exception behavior and permanent limitations, and the
-    FastAPI `add_middleware` recipe's exception-handler caveat (empty
-    when it proves everything). Scoped to the section's own span, never
-    a whole-document check (matching `modes_narrative_problems`'s own
-    established pattern)."""
+    frameworks" section fails to prove DOC-012's integration-route
+    coverage (every supported route for each framework, with the note
+    saying which to choose), HTM-009's placement/tradeoff narrative,
+    HTM-010's unsupported-coexistence note, HTM-011/HTM-012's
+    process_exception behavior and permanent limitations, the FastAPI
+    `add_middleware` recipe's exception-handler caveat, and the Django
+    wrapper route's own measured limit (empty when it proves
+    everything). Scoped to the section's own span, never a whole-document
+    check (matching `modes_narrative_problems`'s own established
+    pattern)."""
     try:
-        recipes_text = section(text, 2, _FRAMEWORK_RECIPES_TITLES[language])
+        recipes_text = section(text, 2, READMES[language]["recipes"])
     except ValueError:
         return ["no Framework recipes section"]
 
@@ -833,14 +1190,17 @@ def framework_recipes_narrative_problems(text, language):
     except ValueError:
         problems.append("no FastAPI subsection")
         fastapi_text = ""
-    if "add_middleware" not in fastapi_text:
-        problems.append("missing add_middleware recipe")
+    for marker in _FASTAPI_ROUTE_MARKERS:
+        if marker not in fastapi_text:
+            problems.append(f"missing FastAPI route {marker!r}")
     if "ServerErrorMiddleware" not in fastapi_text:
         problems.append(
             "missing exception-handler caveat's ServerErrorMiddleware mention"
         )
     if "trace_id" not in fastapi_text:
         problems.append("missing the no-trace_id exception-handler caveat")
+    if not any(phrase in fastapi_text for phrase in _ROUTE_CHOICE_PHRASES[language]):
+        problems.append("missing the FastAPI which-route-to-choose note")
 
     try:
         django_text = section(recipes_text, 3, "Django")
@@ -848,8 +1208,9 @@ def framework_recipes_narrative_problems(text, language):
         problems.append("no Django subsection")
         return problems
 
-    if '"semlog.DjangoMiddleware"' not in django_text:
-        problems.append("missing the settings.MIDDLEWARE recipe")
+    for marker in _DJANGO_ROUTE_MARKERS:
+        if marker not in django_text:
+            problems.append(f"missing Django route {marker!r}")
     if "AppConfig" not in django_text or "ready(self)" not in django_text:
         problems.append("missing the AppConfig.ready() configure() placement")
     for marker in _DJANGO_PLACEMENT_MARKERS[language]:
@@ -860,6 +1221,9 @@ def framework_recipes_narrative_problems(text, language):
     for marker in _DJANGO_LIMITATION_MARKERS[language]:
         if marker not in django_text:
             problems.append(f"missing permanent-limitation marker {marker!r}")
+    for phrase in _DJANGO_WRAPPER_LIMIT_PHRASES[language]:
+        if phrase not in django_text:
+            problems.append(f"missing wrapper-route limit {phrase!r}")
     for marker in _DJANGO_COEXISTENCE_MARKERS[language]:
         if marker not in django_text:
             problems.append(f"missing coexistence marker {marker!r}")
@@ -887,12 +1251,16 @@ def semlog_log_requests_section_problems(text, language):
 
 
 class ReadmeFrameworkRecipesParityTests(unittest.TestCase):
-    """The Django recipe's outermost-placement recommendation and tradeoff
-    (HTM-009), the unsupported WSGI/ASGI coexistence note (HTM-010), the
+    """Every supported integration route for each framework, with the note
+    saying which to choose (DOC-012): for FastAPI, `add_middleware` and
+    wrapping the application, each with its exception-handler caveat; for
+    Django, the `settings.MIDDLEWARE` class and wrapping
+    `get_wsgi_application()`/`get_asgi_application()`, with the latter's
+    own measured limit. Plus the outermost-placement recommendation and
+    tradeoff (HTM-009), the unsupported coexistence note (HTM-010), the
     process_exception behavior and its permanent limitations (HTM-011,
-    HTM-012), and the FastAPI `add_middleware` recipe with its exception-
-    handler caveat, in both editions, plus the `SEMLOG_LOG_REQUESTS`
-    subsection under Configuration. Every assertion is section-scoped
+    HTM-012), in both editions, and the `SEMLOG_LOG_REQUESTS` subsection
+    under Configuration. Every assertion is section-scoped
     (`framework_recipes_narrative_problems`), never a whole-file check.
 
     Proves: DOC-012, HTM-009
@@ -938,28 +1306,79 @@ class ReadmeFrameworkRecipesPerturbationTests(unittest.TestCase):
         )
         self.assertNotEqual(mutated, self.english)
         self.assertIn(
-            "missing add_middleware recipe",
+            "missing FastAPI route "
+            "'app.add_middleware(semlog.ASGIMiddleware, log_requests=True)'",
             framework_recipes_narrative_problems(mutated, "en"),
         )
 
-    def test_removing_the_exception_handler_caveat_is_caught(self):
-        mutated = self.english.replace(
-            "# A global @app.exception_handler(Exception) runs in Starlette's outermost\n"
-            "# ServerErrorMiddleware, outside semlog's own bound context: its logs carry\n"
-            "# no trace_id, and the ERROR completion event has no status code. Wrap\n"
-            "# `app` instead (above) to keep exception handling inside semlog's context.\n",
-            "",
-            1,
+    def test_removing_the_fastapi_wrapper_recipe_is_caught(self):
+        # The second supported route: documenting only `add_middleware`
+        # leaves the reader with the variant whose exception handler runs
+        # outside semlog's own context, and no way to know there is another.
+        mutated = self.english.replace("ASGIMiddleware(app, log_requests=True)", "")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing FastAPI route 'ASGIMiddleware(app, log_requests=True)'",
+            framework_recipes_narrative_problems(mutated, "en"),
         )
+
+    def test_removing_the_route_choice_note_is_caught(self):
+        for language, phrases in _ROUTE_CHOICE_PHRASES.items():
+            original = readme_text(language)
+            mutated = original
+            for phrase in phrases:
+                mutated = mutated.replace(phrase, "Note")
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    "missing the FastAPI which-route-to-choose note",
+                    framework_recipes_narrative_problems(mutated, language),
+                )
+
+    def test_removing_the_django_wrapper_route_is_caught(self):
+        mutated = self.english.replace("get_asgi_application()", "the ASGI callable")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing Django route 'get_asgi_application()'",
+            framework_recipes_narrative_problems(mutated, "en"),
+        )
+
+    def test_removing_the_disable_existing_loggers_note_is_caught(self):
+        for language in READMES:
+            original = readme_text(language)
+            mutated = original.replace("disable_existing_loggers", "that key")
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    "missing Django route 'disable_existing_loggers'",
+                    framework_recipes_narrative_problems(mutated, language),
+                )
+
+    def test_removing_the_django_wrapper_limit_in_both_editions_is_caught(self):
+        for language, phrases in _DJANGO_WRAPPER_LIMIT_PHRASES.items():
+            original = readme_text(language)
+            mutated = original.replace(phrases[0], "does nothing unusual", 1)
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    f"missing wrapper-route limit {phrases[0]!r}",
+                    framework_recipes_narrative_problems(mutated, language),
+                )
+
+    def test_removing_the_exception_handler_caveat_is_caught(self):
+        # The caveat is prose, not a code comment: a code block is
+        # byte-identical across editions, so a caveat written inside one
+        # reaches a Spanish reader in English only.
+        mutated = self.english.replace("ServerErrorMiddleware", "the outer layer")
         self.assertNotEqual(mutated, self.english)
         problems = framework_recipes_narrative_problems(mutated, "en")
-        self.assertTrue(any("ServerErrorMiddleware" in p for p in problems))
+        self.assertTrue(any("ServerErrorMiddleware" in p for p in problems), problems)
 
     def test_removing_the_django_middleware_list_entry_is_caught(self):
         mutated = self.english.replace('"semlog.DjangoMiddleware"', "", 1)
         self.assertNotEqual(mutated, self.english)
         self.assertIn(
-            "missing the settings.MIDDLEWARE recipe",
+            "missing Django route '\"semlog.DjangoMiddleware\"'",
             framework_recipes_narrative_problems(mutated, "en"),
         )
 

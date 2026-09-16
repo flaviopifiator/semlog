@@ -4,18 +4,18 @@
 
 The name is `semantic` plus `log`: semlog applies the field names of OpenTelemetry's Semantic Conventions to log records, so every field carries a stable meaning instead of free-form text.
 
-A service that is already running adopts it in `hybrid` mode, without rewriting any existing log line, and `SEMLOG_MODE=off` returns that process to its previous behavior at its next start.
+A service that is already running adopts it in `hybrid` mode, without rewriting any existing log line, and `SEMLOG_MODE=off` returns that process to its previous behavior at its next start. `hybrid` leaves the root logger's level as it found it, so a process that never set one filters out every `INFO` record, including the `http.server.request` completion event.
 
 Run `python -m semlog llm` (or call `semlog.llm()` from the installed package) for the agent guide matching your installed version.
 
 ## Docs
 
-- [README](README.md): what semlog is for, installation, quick start, public API, FastAPI (`ASGIMiddleware` wrapper and `add_middleware`) and Django (`DjangoMiddleware` in `settings.MIDDLEWARE`) recipes, configuration, output example, and compatibility matrix.
+- [README](README.md): what semlog is, its philosophy, installation, quick start, public API, every FastAPI (`add_middleware` and `ASGIMiddleware` wrapper) and Django (`DjangoMiddleware` in `settings.MIDDLEWARE`, or a `WSGIMiddleware`/`ASGIMiddleware` wrapper around `get_wsgi_application()`/`get_asgi_application()`) integration route, configuration, output example, and compatibility matrix.
 - [STANDARDS](STANDARDS.md): the normative record contract, severity mapping, extension limits, pipeline guarantees, compatibility policy, and references.
 
 ## Agent guide
 
-- [Agent guide](src/semlog/agent_guide.md): the single, self-sufficient English guide for coding agents writing call sites against semlog: public API with signatures (including `DjangoMiddleware`), call-site rules, level semantics, the output contract, configuration, FastAPI (`ASGIMiddleware` wrapper and `add_middleware`) and Django (`settings.MIDDLEWARE`) recipes, and migration/review checklists. Also returned by `semlog.llm()` and `python -m semlog llm`.
+- [Agent guide](src/semlog/agent_guide.md): the single, self-sufficient English guide for coding agents writing call sites against semlog: public API with signatures (including `DjangoMiddleware`), call-site rules, level semantics, the output contract, configuration, every FastAPI (`add_middleware` and `ASGIMiddleware` wrapper) and Django (`settings.MIDDLEWARE` and WSGI/ASGI wrapper) integration route, and migration/review checklists. Also returned by `semlog.llm()` and `python -m semlog llm`.
 
 ## Schemas
 

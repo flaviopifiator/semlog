@@ -539,6 +539,7 @@ def guide_recipes_narrative_problems(text=None):
     sections fail to prove DOC-011's full recipe text -- the
     `add_middleware` recipe and its exception-handler caveat, the
     `settings.MIDDLEWARE` recipe and `AppConfig.ready()` placement, the
+    Django WSGI/ASGI wrapper route with its own measured limit, the
     outermost-placement recommendation, `process_exception`'s behavior
     and its two permanent limitations, the unsupported-coexistence note,
     and the `SEMLOG_LOG_REQUESTS` setting (empty when it proves
@@ -565,6 +566,11 @@ def guide_recipes_narrative_problems(text=None):
         return problems
     if '"semlog.DjangoMiddleware"' not in django_text:
         problems.append("missing settings.MIDDLEWARE recipe")
+    for marker in ("get_wsgi_application()", "get_asgi_application()"):
+        if marker not in django_text:
+            problems.append(f"missing wrapper route {marker!r}")
+    if "500 response before the wrapper sees it" not in django_text:
+        problems.append("missing the wrapper route's exception-visibility limit")
     if "AppConfig" not in django_text or "ready(self)" not in django_text:
         problems.append("missing AppConfig.ready() configure() placement")
     if "outermost" not in django_text:
@@ -690,6 +696,24 @@ class AgentGuideFrameworkRecipesPerturbationTests(unittest.TestCase):
         problems = guide_recipes_narrative_problems(mutated)
         self.assertIn("missing the closer-to-view-direction tradeoff wording", problems)
 
+    def test_removing_the_django_wrapper_route_is_caught(self):
+        mutated = self.text.replace("get_wsgi_application()", "the WSGI callable")
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing wrapper route 'get_wsgi_application()'",
+            guide_recipes_narrative_problems(mutated),
+        )
+
+    def test_removing_the_wrapper_exception_visibility_limit_is_caught(self):
+        mutated = self.text.replace(
+            "500 response before the wrapper sees it", "500 response", 1
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing the wrapper route's exception-visibility limit",
+            guide_recipes_narrative_problems(mutated),
+        )
+
 
 _GUIDE_MODES_SECTION_TITLE = "Execution modes and the semlog=True keyword"
 _GUIDE_MODE_BULLET_MARKERS = ("- **`full`**:", "- **`hybrid`**:", "- **`off`**:")
@@ -704,6 +728,16 @@ _GUIDE_LIMITATION_MARKERS = (
 _GUIDE_TOML_EXAMPLE = '[tool.semlog]\nmode = "hybrid"'
 _GUIDE_TOML_EXAMPLE_MUTATED = '[tool.semlog_typo]\nmode = "hybrid"'
 _GUIDE_TOMLLIB_CAVEAT_VERSION = "3.11"
+# The consequence of hybrid leaving the root logger's level as it found it
+# (LP-010): the standard library's default is `WARNING`, so an INFO record
+# is filtered before hybrid's routing runs. An agent that writes
+# `configure(mode="hybrid")` call sites has to know this, since
+# `configure(level=...)` does not change it.
+_GUIDE_ROOT_LEVEL_MARKERS = (
+    "logging.getLogger().setLevel(logging.INFO)",
+    "`WARNING`",
+    "`http.server.request`",
+)
 
 
 def _guide_modes_section_text(text):
@@ -762,6 +796,10 @@ def guide_modes_narrative_problems(text=None):
 
     if "TypeError" not in section_text:
         problems.append("missing TypeError")
+
+    for marker in _GUIDE_ROOT_LEVEL_MARKERS:
+        if marker not in section_text:
+            problems.append(f"missing root-level marker {marker!r}")
 
     return problems
 
@@ -895,6 +933,30 @@ class AgentGuideModesPerturbationTests(unittest.TestCase):
         self.assertNotEqual(mutated, self.text)
         self.assertIn(
             "missing tomllib version caveat", guide_modes_narrative_problems(mutated)
+        )
+
+    def test_removing_the_root_level_remedy_is_caught(self):
+        mutated = self.text.replace(
+            "logging.getLogger().setLevel(logging.INFO)", "pass"
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing root-level marker 'logging.getLogger().setLevel(logging.INFO)'",
+            guide_modes_narrative_problems(mutated),
+        )
+
+    def test_removing_the_dropped_completion_event_mention_is_caught(self):
+        section_text = _guide_modes_section_text(self.text)
+        line = next(
+            ln for ln in section_text.splitlines() if "`http.server.request`" in ln
+        )
+        mutated = self.text.replace(
+            line, line.replace("`http.server.request`", "it"), 1
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing root-level marker '`http.server.request`'",
+            guide_modes_narrative_problems(mutated),
         )
 
 
