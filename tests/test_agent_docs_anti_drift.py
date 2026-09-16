@@ -72,9 +72,24 @@ _MAX_GUIDE_BYTES = 64 * 1024  # A8: 64 KiB
 # ---------------------------------------------------------------------------
 
 
+_FENCE_RE = re.compile(r"^```")
+
+
 def _headings(text):
-    """Yield `(line_no, level, title)` for every ATX heading."""
+    """Yield `(line_no, level, title)` for every ATX heading outside a
+    fenced code block: a Python comment line (`# ...`) inside a fence
+    would otherwise match the same `#`-prefixed heading pattern and
+    truncate whatever section-extraction relies on this (found while
+    adding the Django/FastAPI recipe checks below, whose own code
+    comments start with a single `#`), matching `tests/_readme_support.
+    py`'s own already fence-aware `_body_lines` precedent."""
+    in_fence = False
     for line_no, line in enumerate(text.splitlines(), start=1):
+        if _FENCE_RE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         m = re.match(r"^(#{1,6}) (.+)$", line)
         if m:
             yield line_no, len(m.group(1)), m.group(2).strip()
@@ -461,6 +476,171 @@ class AgentGuideSizeTests(unittest.TestCase):
     def test_guide_stays_under_64_kib(self):
         size = GUIDE_PATH.stat().st_size
         self.assertLessEqual(size, _MAX_GUIDE_BYTES, f"{size} bytes")
+
+
+def _guide_section_text(text, level, title):
+    span = _section_span(text, level, title)
+    if span is None:
+        return None
+    lines = text.splitlines()
+    return "\n".join(lines[span[0] - 1 : span[1]])
+
+
+def guide_recipes_narrative_problems(text=None):
+    """Every way the guide's "## FastAPI recipe"/"## Django recipe"
+    sections fail to prove DOC-011's full recipe text -- the
+    `add_middleware` recipe and its exception-handler caveat, the
+    `settings.MIDDLEWARE` recipe and `AppConfig.ready()` placement, the
+    outermost-placement recommendation, `process_exception`'s behavior
+    and its two permanent limitations, the unsupported-coexistence note,
+    and the `SEMLOG_LOG_REQUESTS` setting (empty when it proves
+    everything). Scoped to each section's own span, never a whole-file
+    check."""
+    if text is None:
+        text = _guide_text()
+    problems = []
+
+    fastapi_text = _guide_section_text(text, 2, "FastAPI recipe")
+    if fastapi_text is None:
+        problems.append("no 'FastAPI recipe' section")
+        fastapi_text = ""
+    if "add_middleware" not in fastapi_text:
+        problems.append("missing add_middleware recipe")
+    if "ServerErrorMiddleware" not in fastapi_text:
+        problems.append("missing ServerErrorMiddleware exception-handler caveat")
+    if "trace_id" not in fastapi_text:
+        problems.append("missing no-trace_id exception-handler caveat")
+
+    django_text = _guide_section_text(text, 2, "Django recipe")
+    if django_text is None:
+        problems.append("no 'Django recipe' section")
+        return problems
+    if '"semlog.DjangoMiddleware"' not in django_text:
+        problems.append("missing settings.MIDDLEWARE recipe")
+    if "AppConfig" not in django_text or "ready(self)" not in django_text:
+        problems.append("missing AppConfig.ready() configure() placement")
+    if "outermost" not in django_text:
+        problems.append("missing outermost placement recommendation")
+    if "the default recommendation" not in django_text:
+        problems.append("missing the default-recommendation wording")
+    if "covers every other middleware's own logging" not in django_text:
+        problems.append("missing the outermost-direction tradeoff wording")
+    if "maximizes exception-capture priority" not in django_text:
+        problems.append("missing the closer-to-view-direction tradeoff wording")
+    if "process_exception" not in django_text:
+        problems.append("missing process_exception mention")
+    if "cannot observe an exception raised by another middleware" not in django_text:
+        problems.append("missing first permanent-limitation wording")
+    if "pre-empting semlog's own hook" not in django_text:
+        problems.append("missing second permanent-limitation wording")
+    if "neither a defect" not in django_text:
+        problems.append("missing neither-a-defect framing")
+    if "is unsupported" not in django_text:
+        problems.append("missing coexistence-unsupported wording")
+    if "SEMLOG_LOG_REQUESTS" not in django_text:
+        problems.append("missing SEMLOG_LOG_REQUESTS mention")
+
+    return problems
+
+
+class AgentGuideFrameworkRecipesTests(unittest.TestCase):
+    """Proves: DOC-011, HTM-009
+
+    The guide's FastAPI/Django recipe sections prove the full recipe
+    narrative, section-scoped via `guide_recipes_narrative_problems`,
+    including HTM-009's own placement-recommendation and tradeoff
+    narrative."""
+
+    def test_guide_proves_the_full_recipes_narrative(self):
+        self.assertEqual([], guide_recipes_narrative_problems())
+
+
+class AgentGuideFrameworkRecipesPerturbationTests(unittest.TestCase):
+    """Every check `guide_recipes_narrative_problems` performs is
+    demonstrated here to be capable of failing, against deliberately
+    broken in-memory copies of the real guide text. The real file is
+    never written to."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = _guide_text()
+
+    def test_baseline_has_no_problems(self):
+        self.assertEqual([], guide_recipes_narrative_problems(self.text))
+
+    def test_removing_add_middleware_recipe_is_caught(self):
+        mutated = self.text.replace(
+            "app.add_middleware(semlog.ASGIMiddleware, log_requests=True)", "", 1
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing add_middleware recipe", guide_recipes_narrative_problems(mutated)
+        )
+
+    def test_removing_the_django_middleware_entry_is_caught(self):
+        mutated = self.text.replace('"semlog.DjangoMiddleware"', "", 1)
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing settings.MIDDLEWARE recipe",
+            guide_recipes_narrative_problems(mutated),
+        )
+
+    def test_removing_process_exception_mentions_is_caught(self):
+        mutated = self.text.replace("process_exception", "the exception hook")
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing process_exception mention",
+            guide_recipes_narrative_problems(mutated),
+        )
+
+    def test_deleting_the_django_recipe_section_entirely_is_caught(self):
+        start = self.text.index("## Django recipe")
+        end = self.text.index("## When to use each API")
+        mutated = self.text[:start] + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        self.assertEqual(
+            ["no 'Django recipe' section"], guide_recipes_narrative_problems(mutated)
+        )
+
+    def test_removing_the_second_limitation_and_no_defect_framing_is_caught(self):
+        mutated = self.text.replace(
+            "Two permanent limitations, neither a defect: it cannot observe "
+            "an exception raised by another middleware's own code, since "
+            "only a view exception ever reaches it, and a competing "
+            "`process_exception` registered closer to the view can return "
+            "a response first, pre-empting semlog's own hook for that "
+            "request entirely.",
+            "It cannot observe an exception raised by another middleware's "
+            "own code, since only a view exception ever reaches it.",
+            1,
+        )
+        self.assertNotEqual(mutated, self.text)
+        problems = guide_recipes_narrative_problems(mutated)
+        self.assertIn("missing second permanent-limitation wording", problems)
+        self.assertIn("missing neither-a-defect framing", problems)
+
+    def test_removing_the_default_recommendation_wording_is_caught(self):
+        # MINOR-A (round 2): the OLD check accepted just the bare word
+        # "outermost", which alone survives even a "makes no difference"
+        # rewrite of the whole tradeoff sentence.
+        mutated = self.text.replace("the default recommendation", "", 1)
+        self.assertNotEqual(mutated, self.text)
+        problems = guide_recipes_narrative_problems(mutated)
+        self.assertIn("missing the default-recommendation wording", problems)
+
+    def test_removing_the_outermost_direction_tradeoff_wording_is_caught(self):
+        mutated = self.text.replace(
+            "covers every other middleware's own logging", "", 1
+        )
+        self.assertNotEqual(mutated, self.text)
+        problems = guide_recipes_narrative_problems(mutated)
+        self.assertIn("missing the outermost-direction tradeoff wording", problems)
+
+    def test_removing_the_closer_to_view_direction_tradeoff_wording_is_caught(self):
+        mutated = self.text.replace("maximizes exception-capture priority", "", 1)
+        self.assertNotEqual(mutated, self.text)
+        problems = guide_recipes_narrative_problems(mutated)
+        self.assertIn("missing the closer-to-view-direction tradeoff wording", problems)
 
 
 _GUIDE_MODES_SECTION_TITLE = "Execution modes and the semlog=True keyword"

@@ -538,5 +538,302 @@ class ReadmeModesPerturbationTests(unittest.TestCase):
         )
 
 
+_FRAMEWORK_RECIPES_TITLES = {
+    "en": "Framework recipes",
+    "es": "Recetas para frameworks",
+}
+_DJANGO_PLACEMENT_MARKERS = {
+    "en": (
+        "outermost",
+        "closer to the view",
+        "the default recommendation",
+        "covers every other middleware's own logging",
+        "maximizes exception-capture priority",
+    ),
+    "es": (
+        "más externa",
+        "más cerca de la vista",
+        "la recomendación por defecto",
+        "cubre el logging propio de cualquier otro middleware",
+        "maximiza la prioridad de captura de excepciones",
+    ),
+}
+_DJANGO_LIMITATION_MARKER_ES_1 = (
+    "no puede observar una excepción lanzada por el propio código de otro middleware"
+)
+_DJANGO_LIMITATION_MARKER_ES_2 = "anticipándose por completo al propio hook de semlog"
+_DJANGO_LIMITATION_MARKERS = {
+    "en": (
+        "cannot observe an exception raised by another middleware",
+        "pre-empting semlog's own hook",
+        "neither a defect",
+    ),
+    "es": (
+        _DJANGO_LIMITATION_MARKER_ES_1,
+        _DJANGO_LIMITATION_MARKER_ES_2,
+        "ninguna es un defecto",
+    ),
+}
+_DJANGO_COEXISTENCE_MARKERS = {
+    "en": ("is unsupported",),
+    "es": ("no está soportado",),
+}
+
+
+def framework_recipes_narrative_problems(text, language):
+    """Every way `text`'s "## Framework recipes"/"## Recetas para
+    frameworks" section fails to prove HTM-009's placement/tradeoff
+    narrative, HTM-010's unsupported-coexistence note, HTM-011/HTM-012's
+    process_exception behavior and permanent limitations, and the
+    FastAPI `add_middleware` recipe's exception-handler caveat (empty
+    when it proves everything). Scoped to the section's own span, never
+    a whole-document check (matching `modes_narrative_problems`'s own
+    established pattern)."""
+    try:
+        recipes_text = section(text, 2, _FRAMEWORK_RECIPES_TITLES[language])
+    except ValueError:
+        return ["no Framework recipes section"]
+
+    problems = []
+    try:
+        fastapi_text = section(recipes_text, 3, "FastAPI")
+    except ValueError:
+        problems.append("no FastAPI subsection")
+        fastapi_text = ""
+    if "add_middleware" not in fastapi_text:
+        problems.append("missing add_middleware recipe")
+    if "ServerErrorMiddleware" not in fastapi_text:
+        problems.append(
+            "missing exception-handler caveat's ServerErrorMiddleware mention"
+        )
+    if "trace_id" not in fastapi_text:
+        problems.append("missing the no-trace_id exception-handler caveat")
+
+    try:
+        django_text = section(recipes_text, 3, "Django")
+    except ValueError:
+        problems.append("no Django subsection")
+        return problems
+
+    if '"semlog.DjangoMiddleware"' not in django_text:
+        problems.append("missing the settings.MIDDLEWARE recipe")
+    if "AppConfig" not in django_text or "ready(self)" not in django_text:
+        problems.append("missing the AppConfig.ready() configure() placement")
+    for marker in _DJANGO_PLACEMENT_MARKERS[language]:
+        if marker not in django_text:
+            problems.append(f"missing placement marker {marker!r}")
+    if "process_exception" not in django_text:
+        problems.append("missing process_exception mention")
+    for marker in _DJANGO_LIMITATION_MARKERS[language]:
+        if marker not in django_text:
+            problems.append(f"missing permanent-limitation marker {marker!r}")
+    for marker in _DJANGO_COEXISTENCE_MARKERS[language]:
+        if marker not in django_text:
+            problems.append(f"missing coexistence marker {marker!r}")
+    if "SEMLOG_LOG_REQUESTS" not in django_text:
+        problems.append("missing SEMLOG_LOG_REQUESTS reference")
+
+    return problems
+
+
+def semlog_log_requests_section_problems(text, language):
+    """Every way `text` fails to carry the new "### SEMLOG_LOG_REQUESTS"
+    subsection under Configuration (empty when it proves everything)."""
+    labels = READMES[language]
+    try:
+        configuration_text = section(text, 2, labels["configuration"])
+    except ValueError:
+        return ["no Configuration section"]
+    try:
+        setting_text = section(configuration_text, 3, "SEMLOG_LOG_REQUESTS")
+    except ValueError:
+        return ["no SEMLOG_LOG_REQUESTS subsection"]
+    if "SEMLOG_LOG_REQUESTS = True" not in setting_text:
+        return ["missing the setting's own code fence"]
+    return []
+
+
+class ReadmeFrameworkRecipesParityTests(unittest.TestCase):
+    """The Django recipe's outermost-placement recommendation and tradeoff
+    (HTM-009), the unsupported WSGI/ASGI coexistence note (HTM-010), the
+    process_exception behavior and its permanent limitations (HTM-011,
+    HTM-012), and the FastAPI `add_middleware` recipe with its exception-
+    handler caveat, in both editions, plus the `SEMLOG_LOG_REQUESTS`
+    subsection under Configuration. Every assertion is section-scoped
+    (`framework_recipes_narrative_problems`), never a whole-file check.
+
+    Proves: DOC-012, HTM-009
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.texts = {language: readme_text(language) for language in READMES}
+
+    def test_both_editions_prove_the_framework_recipes_narrative(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertEqual(
+                    [], framework_recipes_narrative_problems(text, language)
+                )
+
+    def test_both_editions_document_semlog_log_requests(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertEqual(
+                    [], semlog_log_requests_section_problems(text, language)
+                )
+
+
+class ReadmeFrameworkRecipesPerturbationTests(unittest.TestCase):
+    """Every check `framework_recipes_narrative_problems` and
+    `semlog_log_requests_section_problems` performs is demonstrated here
+    to be capable of failing, against deliberately broken in-memory
+    copies of the real README text. The real files are never written to."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.english = readme_text("en")
+        cls.spanish = readme_text("es")
+
+    def test_baseline_has_no_problems(self):
+        self.assertEqual([], framework_recipes_narrative_problems(self.english, "en"))
+        self.assertEqual([], semlog_log_requests_section_problems(self.english, "en"))
+
+    def test_removing_add_middleware_recipe_is_caught(self):
+        mutated = self.english.replace(
+            "app.add_middleware(semlog.ASGIMiddleware, log_requests=True)", "", 1
+        )
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing add_middleware recipe",
+            framework_recipes_narrative_problems(mutated, "en"),
+        )
+
+    def test_removing_the_exception_handler_caveat_is_caught(self):
+        mutated = self.english.replace(
+            "# A global @app.exception_handler(Exception) runs in Starlette's outermost\n"
+            "# ServerErrorMiddleware, outside semlog's own bound context: its logs carry\n"
+            "# no trace_id, and the ERROR completion event has no status code. Wrap\n"
+            "# `app` instead (above) to keep exception handling inside semlog's context.\n",
+            "",
+            1,
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = framework_recipes_narrative_problems(mutated, "en")
+        self.assertTrue(any("ServerErrorMiddleware" in p for p in problems))
+
+    def test_removing_the_django_middleware_list_entry_is_caught(self):
+        mutated = self.english.replace('"semlog.DjangoMiddleware"', "", 1)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing the settings.MIDDLEWARE recipe",
+            framework_recipes_narrative_problems(mutated, "en"),
+        )
+
+    def test_removing_process_exception_mentions_is_caught(self):
+        mutated = self.english.replace("process_exception", "the exception hook")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing process_exception mention",
+            framework_recipes_narrative_problems(mutated, "en"),
+        )
+
+    def test_removing_the_coexistence_note_is_caught(self):
+        mutated = self.english.replace(
+            "wrapping the same application is unsupported", "is a valid combination"
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = framework_recipes_narrative_problems(mutated, "en")
+        self.assertTrue(any("coexistence marker" in p for p in problems))
+
+    def test_removing_the_semlog_log_requests_subsection_is_caught(self):
+        start = self.english.index("### SEMLOG_LOG_REQUESTS")
+        end = self.english.index("## Modes")
+        mutated = self.english[:start] + self.english[end:]
+        self.assertNotEqual(mutated, self.english)
+        self.assertEqual(
+            ["no SEMLOG_LOG_REQUESTS subsection"],
+            semlog_log_requests_section_problems(mutated, "en"),
+        )
+
+    def test_deleting_the_framework_recipes_section_entirely_is_caught(self):
+        start = self.english.index("## Framework recipes")
+        end = self.english.index("## Configuration")
+        mutated = self.english[:start] + self.english[end:]
+        self.assertNotEqual(mutated, self.english)
+        self.assertEqual(
+            ["no Framework recipes section"],
+            framework_recipes_narrative_problems(mutated, "en"),
+        )
+
+    def test_removing_the_second_limitation_and_no_defect_framing_is_caught(self):
+        mutated = self.english.replace(
+            "Two permanent limitations, neither a defect: it cannot observe "
+            "an exception raised by another middleware's own code, since "
+            "only a view exception ever reaches it, and a competing "
+            "`process_exception` registered closer to the view can return "
+            "a response first, pre-empting semlog's own hook for that "
+            "request entirely.",
+            "It cannot observe an exception raised by another middleware's "
+            "own code, since only a view exception ever reaches it.",
+            1,
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = framework_recipes_narrative_problems(mutated, "en")
+        self.assertTrue(
+            any("pre-empting semlog's own hook" in p for p in problems), problems
+        )
+        self.assertTrue(any("neither a defect" in p for p in problems), problems)
+
+    def test_removing_the_default_recommendation_wording_is_caught(self):
+        # MINOR-A (round 2): the OLD marker set ("outermost", "closer to
+        # the view") stayed green even when the whole tradeoff paragraph
+        # was rewritten to say placement makes no difference at all,
+        # since "closer to the view" also survives inside HTM-012's own
+        # limitation sentence. This mutation keeps both old markers
+        # present while deleting only the default-recommendation phrase.
+        mutated = self.english.replace("the default recommendation", "", 1)
+        self.assertNotEqual(mutated, self.english)
+        problems = framework_recipes_narrative_problems(mutated, "en")
+        self.assertTrue(
+            any("the default recommendation" in p for p in problems), problems
+        )
+
+    def test_removing_the_outermost_direction_tradeoff_wording_is_caught(self):
+        mutated = self.english.replace(
+            "covers every other middleware's own logging", "", 1
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = framework_recipes_narrative_problems(mutated, "en")
+        self.assertTrue(
+            any("covers every other middleware's own logging" in p for p in problems),
+            problems,
+        )
+
+    def test_removing_the_closer_to_view_direction_tradeoff_wording_is_caught(self):
+        mutated = self.english.replace("maximizes exception-capture priority", "", 1)
+        self.assertNotEqual(mutated, self.english)
+        problems = framework_recipes_narrative_problems(mutated, "en")
+        self.assertTrue(
+            any("maximizes exception-capture priority" in p for p in problems),
+            problems,
+        )
+
+    def test_no_difference_rewrite_is_caught(self):
+        # The exact round-2 finding, reproduced directly: rewriting the
+        # whole tradeoff paragraph to claim placement makes no difference
+        # must not stay green.
+        start = self.english.index("Placed outermost (first in")
+        end = self.english.index("`process_exception` stashes")
+        mutated = (
+            self.english[:start]
+            + "Put it wherever you like: outermost or closer to the view, "
+            "it makes no difference at all.\n\n" + self.english[end:]
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = framework_recipes_narrative_problems(mutated, "en")
+        self.assertTrue(problems, "the no-difference rewrite must be caught")
+
+
 if __name__ == "__main__":
     unittest.main()
