@@ -31,6 +31,8 @@ import semlog
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+PACKAGE_DIR = REPO_ROOT / "src" / "semlog"
+PY_TYPED_PATH = PACKAGE_DIR / "py.typed"
 
 
 def _pyproject_text() -> str:
@@ -135,6 +137,39 @@ class ClassifiersTests(unittest.TestCase):
     def test_classifiers_are_sorted_and_unique(self):
         classifiers = _classifiers()
         self.assertEqual(sorted(set(classifiers)), classifiers)
+
+
+class Pep561TypingMarkerTests(unittest.TestCase):
+    """The PEP 561 `py.typed` marker and the `Typing :: Typed` classifier
+    that advertises it. Every module in `src/semlog` is annotated inline,
+    but a type checker ignores those annotations in an installed package
+    unless the marker file is present, so the marker is what makes the
+    annotations reach a consumer at all. Marker and classifier are checked
+    together, in both directions: the classifier without the marker is a
+    claim the package does not honor, and the marker without the
+    classifier hides a fact PyPI could show. Supporting checks, no
+    `Proves` tag: no STANDARDS.md requirement governs the marker, and
+    `tests/test_wheel_contents.py` proves the built wheel actually carries
+    it. CP-017's line budget is unaffected: it counts `*.py` files only,
+    so package data never reaches it."""
+
+    def test_marker_sits_inside_the_importable_package(self):
+        self.assertTrue((PACKAGE_DIR / "__init__.py").is_file())
+        self.assertTrue(PY_TYPED_PATH.is_file(), "no PEP 561 py.typed marker")
+
+    def test_marker_is_the_empty_file_pep_561_prescribes(self):
+        self.assertEqual(b"", PY_TYPED_PATH.read_bytes())
+
+    def test_typing_typed_classifier_is_declared(self):
+        self.assertIn("Typing :: Typed", _classifiers())
+
+    def test_marker_and_classifier_are_declared_together(self):
+        self.assertEqual(
+            PY_TYPED_PATH.is_file(),
+            "Typing :: Typed" in _classifiers(),
+            "the py.typed marker and the Typing :: Typed classifier must "
+            "ship together; neither one alone is an honest claim",
+        )
 
 
 class PackagingLayerSurfaceFactsTests(unittest.TestCase):

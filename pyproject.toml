@@ -29,6 +29,10 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
     "Topic :: System :: Logging",
+    # Backed by the PEP 561 marker at src/semlog/py.typed, which ships
+    # inside the wheel so a type checker reads the package's inline
+    # annotations; tests/test_packaging.py keeps the two in step.
+    "Typing :: Typed",
 ]
 # CP-003/LP-001: the built distribution declares zero runtime dependencies.
 dependencies = []
