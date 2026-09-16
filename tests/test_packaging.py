@@ -31,6 +31,8 @@ import semlog
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
+PACKAGE_DIR = REPO_ROOT / "src" / "semlog"
+PY_TYPED_PATH = PACKAGE_DIR / "py.typed"
 
 
 def _pyproject_text() -> str:
@@ -94,6 +96,27 @@ def _classifiers():
     return re.findall(r'"([^"]+)"', match.group(1)) if match else []
 
 
+def _keywords():
+    data = _load_pyproject()
+    if data is not None:
+        return data["project"].get("keywords", [])
+    match = re.search(r"(?ms)^keywords\s*=\s*\[(.*?)\]", _pyproject_text())
+    return re.findall(r'"([^"]+)"', match.group(1)) if match else []
+
+
+def _project_urls():
+    data = _load_pyproject()
+    if data is not None:
+        return data["project"].get("urls", {})
+    match = re.search(
+        r"(?ms)^\[project\.urls\]\n(.*?)(?=^\[|\Z)",
+        _pyproject_text(),
+    )
+    if match is None:
+        return {}
+    return dict(re.findall(r'(?m)^(\w+)\s*=\s*"([^"]+)"', match.group(1)))
+
+
 def _ci_supported_pythons():
     """The CI test matrix's Python versions, without the one allowed to fail."""
     ci_text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
@@ -126,7 +149,9 @@ class ClassifiersTests(unittest.TestCase):
             "License :: OSI Approved :: Apache Software License",
             "Operating System :: OS Independent",
             "Topic :: System :: Logging",
+            "Topic :: Software Development :: Libraries :: Python Modules",
             "Development Status :: 3 - Alpha",
+            "Intended Audience :: Developers",
         ):
             with self.subTest(classifier=expected):
                 self.assertIn(expected, classifiers)
@@ -135,6 +160,85 @@ class ClassifiersTests(unittest.TestCase):
     def test_classifiers_are_sorted_and_unique(self):
         classifiers = _classifiers()
         self.assertEqual(sorted(set(classifiers)), classifiers)
+
+
+class DiscoverabilityMetadataTests(unittest.TestCase):
+    """The metadata a reader finds the project by: `keywords`, which is
+    the only field PyPI's own search reads besides the name, summary and
+    description, and the `Documentation` URL, which PyPI renders as a
+    sidebar link. Both are absent from a `pyproject.toml` that is
+    otherwise complete, so they are asserted rather than assumed.
+    Supporting checks, no `Proves` tag: no STANDARDS.md requirement
+    governs either field."""
+
+    def test_keywords_are_declared(self):
+        self.assertTrue(_keywords(), "no `keywords` declared for PyPI search")
+
+    def test_keywords_name_the_subject_matter(self):
+        declared = {keyword.lower() for keyword in _keywords()}
+        for expected in (
+            "logging",
+            "structured logging",
+            "json",
+            "opentelemetry",
+            "otel",
+            "observability",
+            "trace context",
+        ):
+            with self.subTest(keyword=expected):
+                self.assertIn(expected, declared)
+
+    def test_keywords_are_lowercase_and_unique(self):
+        declared = _keywords()
+        self.assertEqual([k.lower() for k in declared], declared)
+        self.assertEqual(len(set(declared)), len(declared))
+
+    def test_documentation_url_points_at_the_readme_on_the_repository(self):
+        urls = _project_urls()
+        documentation = urls.get("Documentation")
+        self.assertIsNotNone(documentation, "no `Documentation` project URL")
+        self.assertEqual(f"{urls['Repository']}#readme", documentation)
+
+    def test_every_project_url_is_an_https_url(self):
+        offenders = [
+            f"{name}: {url}"
+            for name, url in _project_urls().items()
+            if not url.startswith("https://")
+        ]
+        self.assertEqual([], offenders)
+
+
+class Pep561TypingMarkerTests(unittest.TestCase):
+    """The PEP 561 `py.typed` marker and the `Typing :: Typed` classifier
+    that advertises it. Every module in `src/semlog` is annotated inline,
+    but a type checker ignores those annotations in an installed package
+    unless the marker file is present, so the marker is what makes the
+    annotations reach a consumer at all. Marker and classifier are checked
+    together, in both directions: the classifier without the marker is a
+    claim the package does not honor, and the marker without the
+    classifier hides a fact PyPI could show. Supporting checks, no
+    `Proves` tag: no STANDARDS.md requirement governs the marker, and
+    `tests/test_wheel_contents.py` proves the built wheel actually carries
+    it. CP-017's line budget is unaffected: it counts `*.py` files only,
+    so package data never reaches it."""
+
+    def test_marker_sits_inside_the_importable_package(self):
+        self.assertTrue((PACKAGE_DIR / "__init__.py").is_file())
+        self.assertTrue(PY_TYPED_PATH.is_file(), "no PEP 561 py.typed marker")
+
+    def test_marker_is_the_empty_file_pep_561_prescribes(self):
+        self.assertEqual(b"", PY_TYPED_PATH.read_bytes())
+
+    def test_typing_typed_classifier_is_declared(self):
+        self.assertIn("Typing :: Typed", _classifiers())
+
+    def test_marker_and_classifier_are_declared_together(self):
+        self.assertEqual(
+            PY_TYPED_PATH.is_file(),
+            "Typing :: Typed" in _classifiers(),
+            "the py.typed marker and the Typing :: Typed classifier must "
+            "ship together; neither one alone is an honest claim",
+        )
 
 
 class PackagingLayerSurfaceFactsTests(unittest.TestCase):

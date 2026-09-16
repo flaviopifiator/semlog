@@ -288,6 +288,54 @@ class LlmsTxtConformanceTests(unittest.TestCase):
         self.assertEqual([], _missing_required_targets(self.text))
 
 
+# Where the name comes from, as the tokens that carry it. The same four
+# appear in both README editions (`tests/test_readme_i18n.py`), so the three
+# agent-facing documents and the two READMEs cannot drift apart on the one
+# fact that explains every field name in the output contract.
+_NAME_TOKENS = ("`semantic`", "`log`", "OpenTelemetry", "Semantic Conventions")
+
+
+def _name_explanation_problems(text):
+    """Every name-explanation token `text` is missing (empty when it
+    carries all of them)."""
+    return [
+        f"missing name-explanation token {token!r}"
+        for token in _NAME_TOKENS
+        if token not in text
+    ]
+
+
+class NameExplanationTests(unittest.TestCase):
+    """The agent-facing documents say where the name comes from, in the
+    same terms as both README editions: `semantic` plus `log`, after
+    OpenTelemetry's Semantic Conventions. An agent that knows this reads
+    the field names as a specification rather than as arbitrary strings.
+    Not tied to a single STANDARDS.md requirement id (same precedent as
+    `tests/test_class_budget.py`), so no `Proves:` line."""
+
+    def test_llms_txt_explains_the_name(self):
+        text = LLMS_TXT_PATH.read_text(encoding="utf-8")
+        self.assertEqual([], _name_explanation_problems(text))
+
+    def test_agent_guide_explains_the_name(self):
+        self.assertEqual([], _name_explanation_problems(_guide_text()))
+
+    def test_the_explanation_is_not_vacuous(self):
+        """Each document is shown to fail the check once the explanation is
+        removed from an in-memory copy; the real files are untouched."""
+        for label, text in (
+            ("llms.txt", LLMS_TXT_PATH.read_text(encoding="utf-8")),
+            ("agent_guide.md", _guide_text()),
+        ):
+            with self.subTest(document=label):
+                mutated = text.replace("Semantic Conventions", "conventions")
+                self.assertNotEqual(mutated, text)
+                self.assertIn(
+                    "missing name-explanation token 'Semantic Conventions'",
+                    _name_explanation_problems(mutated),
+                )
+
+
 def _missing_or_out_of_order_h2(text):
     """Required H2 titles absent, or present only before an earlier
     required title (A5)."""

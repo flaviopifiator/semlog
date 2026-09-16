@@ -81,6 +81,14 @@ class WheelContentTests(unittest.TestCase):
         matches = [n for n in self.names if n.endswith("agent_guide.md")]
         self.assertEqual(["semlog/agent_guide.md"], matches)
 
+    def test_py_typed_marker_ships_inside_the_package(self):
+        """PEP 561: a type checker ignores an installed package's inline
+        annotations unless this marker travels with it, so building the
+        wheel is the only place the claim can actually be checked. It ships
+        exactly once, inside `semlog/`, never at the archive root."""
+        matches = [n for n in self.names if n.rsplit("/", 1)[-1] == "py.typed"]
+        self.assertEqual(["semlog/py.typed"], matches)
+
     def test_package_python_source_files_are_present(self):
         py_files = [n for n in self.names if n.endswith(".py")]
         self.assertIn("semlog/__init__.py", py_files)
