@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `app.add_middleware(semlog.ASGIMiddleware, ...)` recipe alongside the
   existing wrapper recipe, with its exception-handler caveat, in
   README.md, README.es.md, the agent guide and llms.txt.
+- A PEP 561 `py.typed` marker inside the package, so a type checker reads
+  the annotations semlog already carries instead of ignoring the package.
+- PyPI keywords, a `Documentation` project URL and the
+  `Intended Audience :: Developers`,
+  `Topic :: Software Development :: Libraries :: Python Modules` and
+  `Typing :: Typed` classifiers.
 
 ### Changed
 
