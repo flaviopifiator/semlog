@@ -145,6 +145,49 @@ class Changelog020Tests(unittest.TestCase):
         self.assertTrue(fixed)
 
 
+class Changelog030Tests(unittest.TestCase):
+    """Proves: DOC-013
+
+    CHANGELOG.md's `## [0.3.0]` section: a dated heading, a non-empty
+    `### Added` subsection naming `DjangoMiddleware` and the FastAPI
+    `add_middleware` recipe, and a non-empty `### Changed` subsection for
+    the CP-015/CP-017 amendments; `pyproject.toml` reads `0.3.0`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        cls.section = _changelog_section(cls.text, "## [0.3.0]")
+
+    def test_changelog_has_a_dated_0_3_0_heading(self):
+        self.assertRegex(self.text, r"(?m)^## \[0\.3\.0\] - \d{4}-\d{2}-\d{2}$")
+
+    def test_0_3_0_has_a_non_empty_added_subsection_naming_django_and_fastapi(self):
+        added = _subsection(self.section, "### Added")
+        self.assertIsNotNone(added, "no ### Added subsection")
+        self.assertTrue(added)
+        self.assertIn("DjangoMiddleware", added)
+        self.assertIn("FastAPI", added)
+
+    def test_0_3_0_has_a_non_empty_changed_subsection(self):
+        changed = _subsection(self.section, "### Changed")
+        self.assertIsNotNone(changed, "no ### Changed subsection")
+        self.assertTrue(changed)
+
+    def test_pyproject_reads_0_3_0(self):
+        version, _license = _load_pyproject_project_table()
+        self.assertEqual("0.3.0", version)
+
+    def test_0_3_0_heading_precedes_the_0_2_0_heading(self):
+        # MINOR-C (round 2): DOC-013's own "The prior ## [0.2.0] section
+        # MUST remain, unchanged, BELOW it" clause was unenforced --
+        # swapping the two sections left every other check here green.
+        self.assertLess(
+            self.text.index("## [0.3.0]"),
+            self.text.index("## [0.2.0]"),
+            "## [0.3.0] must appear before ## [0.2.0], newest-first",
+        )
+
+
 class SemlogImportsWithoutDjangoTests(unittest.TestCase):
     """Proves: CP-008, HTM-008
 

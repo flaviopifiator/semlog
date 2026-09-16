@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-16
+
+### Added
+
+- `DjangoMiddleware`, a `settings.MIDDLEWARE` entry serving both
+  synchronous and asynchronous Django deployments through exactly one
+  class: dual sync/async marking with a stdlib-only coroutine-function
+  shim, no `django`/`asgiref` import at `semlog` import time, per-request
+  trace/baggage/identity binding, the existing `full`/`hybrid`/`off` mode
+  guarantees, `process_exception` capturing an unhandled view exception
+  without swallowing it, and context preservation throughout a
+  `StreamingHttpResponse` body (verified on Django 3.2.9, the oldest
+  supported row), with a documented `FileResponse` carve-out.
+- The Django completion event, enabled through the new
+  `SEMLOG_LOG_REQUESTS` setting instead of a constructor keyword, since
+  Django instantiates a `settings.MIDDLEWARE` entry with a single
+  positional argument; default off, read once at construction, an
+  explicit `log_requests=` keyword still wins, and a non-boolean value
+  raises `ValueError` naming the value and its source.
+- Documentation for the Django `settings.MIDDLEWARE` recipe (outermost
+  placement recommendation and its ordering tradeoff, the permanent
+  `process_exception` limitations, and the unsupported coexistence with
+  `WSGIMiddleware`/`ASGIMiddleware`), and the FastAPI
+  `app.add_middleware(semlog.ASGIMiddleware, ...)` recipe alongside the
+  existing wrapper recipe, with its exception-handler caveat, in
+  README.md, README.es.md, the agent guide and llms.txt.
+
+### Changed
+
+- CP-015's public surface grows from eight names to nine, adding
+  `DjangoMiddleware`, with a documented exception for the
+  `SEMLOG_LOG_REQUESTS` Django setting.
+- CP-017 removes both its numeric budgets (the 1500-line source-code
+  budget and the 6-class budget); only the no-abstract-base-class and
+  no-class-factory rules remain, with human review as the guardrail
+  against unbounded growth. `tests/test_source_budget.py` is deleted.
+
 ## [0.2.0] - 2026-09-15
 
 ### Added
