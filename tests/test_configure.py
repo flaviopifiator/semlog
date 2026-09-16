@@ -183,12 +183,23 @@ class FullModeReplacesForeignRootHandlersTests(unittest.TestCase):
         self.assertEqual("app.event", line["event_name"])
 
     def test_repeat_full_configure_leaves_exactly_one_semlog_handler(self):
+        # On Python 3.10, the second configure() call's SI-005 diagnostic
+        # ("no tomllib") fires before its own pipeline is installed, so it
+        # routes through the FIRST call's already-installed handler and
+        # would otherwise leak a real JSON line to the process's actual
+        # stdout during the suite (NIT 2, validate-wu25b #337); FakeStdout
+        # keeps it captured like every other configure()-driving test here.
         root = logging.getLogger()
         foreign_handler = logging.StreamHandler(io.StringIO())
         root.addHandler(foreign_handler)
-        with mock.patch.dict("os.environ", {}, clear=True):
+        fake_stdout = FakeStdout()
+        with (
+            mock.patch("sys.stdout", fake_stdout),
+            mock.patch.dict("os.environ", {}, clear=True),
+        ):
             configure(mode="full", service_name="svc-a", search_dir=".")
             configure(mode="full", service_name="svc-b", search_dir=".")
+            _transport.flush(timeout=2)
         self.assertEqual(1, len(root.handlers))
         self.assertIsInstance(root.handlers[0], _transport.SemlogQueueHandler)
 

@@ -9,10 +9,8 @@ handler (an "observer", any `logging.Handler` subclass that is not a
 already gone. An unmarked call prints byte-identical output to a process
 where semlog was never imported.
 
-No `Proves:` line yet: LM-003 is not declared in STANDARDS.md until Phase
-7 of this change (same deferred-citation precedent as
-`test_class_budget.py`/`test_source_budget.py`); tag the relevant classes
-below `Proves: LM-003` once that declaration lands.
+LM-003 (STANDARDS.md, WU6); the relevant classes below carry their own
+`Proves: LM-003` docstring line.
 """
 
 from __future__ import annotations
@@ -60,6 +58,8 @@ def _hybrid_configure(**kwargs):
 
 
 class HybridRoutingTests(unittest.TestCase):
+    """Proves: LM-003"""
+
     def tearDown(self):
         _reset_state()
 
@@ -103,6 +103,40 @@ class HybridRoutingTests(unittest.TestCase):
             logger.info("app.hidden", semlog=True)
             _transport.flush(timeout=2)
         self.assertEqual("", captured.getvalue())
+
+    def test_marked_record_still_rendered_by_a_handle_override_without_super(self):
+        """LM-004 (validate-wu69 #338, m2): the suppression patch lives on
+        `StreamHandler.handle` itself; a subclass that overrides `handle()`
+        WITHOUT calling `super().handle()` never reaches the patched
+        method, so it still renders a marked record as text -- a
+        documented limitation, not a defect. A sibling subclass that DOES
+        call `super().handle()` stays correctly suppressed."""
+        fake_stdout = FakeStdout()
+        with mock.patch("sys.stdout", fake_stdout):
+            _hybrid_configure()
+            captured_override, captured_super = io.StringIO(), io.StringIO()
+
+            class _OverridingHandler(logging.StreamHandler):
+                def handle(self, record):
+                    # Bypasses the patched base-class method entirely.
+                    self.stream.write(self.format(record) + "\n")
+                    return True
+
+            class _SuperCallingHandler(logging.StreamHandler):
+                def handle(self, record):
+                    return super().handle(record)
+
+            overriding = _OverridingHandler(captured_override)
+            super_calling = _SuperCallingHandler(captured_super)
+            logger = logging.getLogger("semlog.tests.hybrid.override")
+            logger.handlers = [overriding, super_calling]
+            logger.propagate = False
+            logger.setLevel(logging.INFO)
+            self.addCleanup(setattr, logger, "handlers", [])
+            logger.info("app.override.marked", semlog=True)
+            _transport.flush(timeout=2)
+        self.assertIn("app.override.marked", captured_override.getvalue())
+        self.assertEqual("", captured_super.getvalue())
 
     def test_marked_record_hidden_from_filehandler(self):
         fake_stdout = FakeStdout()
@@ -311,7 +345,10 @@ class HybridSemlogOwnedRecordsTests(unittest.TestCase):
     so a mutant reverting any of them to immediate/unmarked emission
     survived unnoticed: the deferred SI-005 pyproject diagnostic (erratum
     8), the `bind_ignored` out-of-scope diagnostic, and the
-    catalog-violation warning."""
+    catalog-violation warning.
+
+    Proves: LM-003
+    """
 
     def tearDown(self):
         _reset_state()
@@ -392,7 +429,10 @@ class HybridSemlogOwnedRecordsTests(unittest.TestCase):
 class HybridConfigureRepeatTests(unittest.TestCase):
     """A repeat `configure(mode="hybrid")` call that raises during
     validation must leave `state.marking` and routing exactly as the
-    first successful call left them (validation-4 minor)."""
+    first successful call left them (validation-4 minor).
+
+    Proves: LM-003
+    """
 
     def tearDown(self):
         _reset_state()
@@ -416,7 +456,10 @@ class HybridConfigureRepeatTests(unittest.TestCase):
 class HybridByteIdentityTests(unittest.TestCase):
     """Subprocess A/B: an unmarked call's `StreamHandler` output must be
     byte-identical whether or not semlog was ever imported, using
-    `%(funcName)s`/`%(lineno)d` so any stacklevel drift would be caught."""
+    `%(funcName)s`/`%(lineno)d` so any stacklevel drift would be caught.
+
+    Proves: LM-003
+    """
 
     def test_unmarked_streamhandler_output_matches_a_process_without_semlog(self):
         src_dir = str(Path(__file__).resolve().parents[1] / "src")

@@ -892,10 +892,10 @@ class FlushAndShutdownTests(unittest.TestCase):
 class FlushDeadWriterTests(unittest.TestCase):
     """flush() must return promptly, without waiting out the full timeout,
     once the writer thread has already died instead of processing the
-    flush marker (design D1 flush()). No requirement id is declared for
-    this fix yet on its own -- see `test_writer_never_starts_at_import`
-    (`WriterTests`) and `test_class_budget.py` for
-    the same deferred-citation precedent."""
+    flush marker (design D1 flush()).
+
+    Proves: LP-011
+    """
 
     def tearDown(self):
         # This class deliberately builds writers whose `_thread` was
@@ -1153,10 +1153,10 @@ class ShutdownNonRootTests(unittest.TestCase):
     """`_shutdown` must not raise when its handler is not currently
     attached to the root logger, and the post-shutdown fallback handler
     must resolve `stderr` the same robust way `Writer.handle` resolves
-    `stdout` (design D1 `_shutdown`). No requirement id is declared for
-    this fix yet on its own -- see `test_writer_never_starts_at_import`
-    (`WriterTests`) and `test_class_budget.py` for
-    the same deferred-citation precedent."""
+    `stdout` (design D1 `_shutdown`).
+
+    Proves: LP-012
+    """
 
     def tearDown(self):
         if _transport._state.writer is not None:

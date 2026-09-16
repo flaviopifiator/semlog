@@ -8,10 +8,8 @@ extra call frame between the caller and the stdlib's real `_log`, so
 caller-visible `LogRecord` metadata (`filename`, `lineno`, `funcName`,
 `module`) stays identical to the same call site without the keyword.
 
-No `Proves:` line yet: LM-002 is not declared in STANDARDS.md until Phase
-7 of this change (same deferred-citation precedent as
-`test_class_budget.py`/`test_source_budget.py`); tag the relevant classes
-below `Proves: LM-002` once that declaration lands.
+LM-002 (STANDARDS.md, WU6); every class below carries its own
+`Proves: LM-002` docstring line.
 """
 
 from __future__ import annotations
@@ -47,7 +45,10 @@ def _bound_logger(name):
 
 class PreConfigureKeywordTests(unittest.TestCase):
     """The keyword must be accepted before `configure()` ever runs, since
-    `_modes.py`'s patch arms at import time, not inside `configure()`."""
+    `_modes.py`'s patch arms at import time, not inside `configure()`.
+
+    Proves: LM-002
+    """
 
     def test_semlog_true_accepted_before_configure_is_ever_called(self):
         logger, handler = _bound_logger("semlog.tests.keyword.preconfigure")
@@ -56,6 +57,8 @@ class PreConfigureKeywordTests(unittest.TestCase):
 
 
 class EveryModeNeverRaisesTests(unittest.TestCase):
+    """Proves: LM-002"""
+
     def tearDown(self):
         reset_pipeline()
         _modes.state.mode = "full"
@@ -80,6 +83,8 @@ class EveryModeNeverRaisesTests(unittest.TestCase):
 
 
 class ExtraNotMutatedTests(unittest.TestCase):
+    """Proves: LM-002"""
+
     def test_callers_extra_dict_object_keeps_exactly_its_original_keys(self):
         logger, _handler = _bound_logger("semlog.tests.keyword.extra")
         extra = {"app.a": 1}
@@ -90,7 +95,10 @@ class ExtraNotMutatedTests(unittest.TestCase):
 class MarkerAbsenceTests(unittest.TestCase):
     """Before hybrid routing ever arms `state.marking` (WU4), the marker
     must never appear anywhere: not on the record, not in the caller's
-    `extra`, regardless of mode."""
+    `extra`, regardless of mode.
+
+    Proves: LM-002
+    """
 
     def tearDown(self):
         reset_pipeline()
@@ -128,7 +136,10 @@ class MarkingMechanismTests(unittest.TestCase):
     """Direct, low-level proof that the `_log` patch attaches the marker
     exactly when `state.marking` is armed -- independent of hybrid's own
     routing wrapper (WU4), which is the thing that later pops it again
-    before any handler runs."""
+    before any handler runs.
+
+    Proves: LM-002
+    """
 
     def tearDown(self):
         _modes.state.marking = False
@@ -182,6 +193,13 @@ def _helper_twin(logger, semlog):
     _via_helper()
 
 
+def _stack_info_twin(logger, semlog):
+    def _via_helper():
+        logger.info("app.twin.stack_info", stack_info=True, stacklevel=2, semlog=semlog)
+
+    _via_helper()
+
+
 #: MINOR M3 (validate-wu25 #333): twin-vs-twin equality alone cannot
 #: detect a `stacklevel` offset applied uniformly to both sides, since
 #: both the marked and unmarked call go through the SAME patched `_log`
@@ -194,6 +212,15 @@ def _helper_twin(logger, semlog):
 #: (`stacklevel + (1 if stacklevel == 1 else 0)` and
 #: `stacklevel + (0 if stack_info or exc_info else 1)`) by applying each
 #: to `_modes.py` and observing this exact assertion fail.
+#:
+#: Round 2 (validate-wu25b #337, MINOR 1): the second mutant above
+#: survived the WHOLE suite on Python 3.10, because every other twin's
+#: call shape happens to be equivalent on 3.10 for that exact mutant
+#: (`exc_info` shapes, and `stack_info` with `stacklevel=1`); only a
+#: `stack_info=True` call with `stacklevel>=2` is 3.10-observable.
+#: `_stack_info_twin` closes that gap: `stack_info` never changes stdlib
+#: frame-walking on any supported version, so its known-correct
+#: `funcName` is the outer caller, same as `_helper_twin`'s own shape.
 _EXPECTED_FUNC_NAME = {
     "_direct_twin": "_direct_twin",
     "_log_method_twin": "_log_method_twin",
@@ -202,6 +229,7 @@ _EXPECTED_FUNC_NAME = {
     if sys.version_info >= (3, 11)
     else "_adapter_twin",
     "_helper_twin": "_helper_twin",
+    "_stack_info_twin": "_stack_info_twin",
 }
 
 
@@ -215,7 +243,10 @@ class CallerMetadataTwinTests(unittest.TestCase):
     3.10 `LoggerAdapter` case resolves to a different (but still
     version-pinned, not twin-only) expectation, since 3.10's stdlib
     `LoggerAdapter` has its own pre-existing `stacklevel` quirk
-    independent of this patch."""
+    independent of this patch.
+
+    Proves: LM-002
+    """
 
     def _twin_metadata(self, twin_fn):
         # Both invocations come from the exact same call site (a loop body),
@@ -254,6 +285,13 @@ class CallerMetadataTwinTests(unittest.TestCase):
     def test_helper_wrapper_with_stacklevel_2_metadata_matches_its_twin(self):
         self._assert_matches_twin_and_known_correct_func_name(_helper_twin)
 
+    def test_stack_info_with_stacklevel_2_metadata_matches_its_twin(self):
+        """Round 2 (validate-wu25b #337, MINOR 1): the only call shape that
+        exposes the `stacklevel + (0 if stack_info or exc_info else 1)`
+        mutant on Python 3.10 -- every other twin's shape is equivalent to
+        the fixed code there."""
+        self._assert_matches_twin_and_known_correct_func_name(_stack_info_twin)
+
 
 class ReArmIdempotenceTests(unittest.TestCase):
     """Idempotence of the `_log` patch across a REAL module reload (NIT,
@@ -265,7 +303,10 @@ class ReArmIdempotenceTests(unittest.TestCase):
     `_semlog_original` resolving to the TRUE stdlib base, never to a
     previous wrapper, or a second reload after that would chain-wrap,
     breaking every caller-metadata guarantee above with a doubled
-    `stacklevel` bump."""
+    `stacklevel` bump.
+
+    Proves: LM-002
+    """
 
     def setUp(self):
         # A reload resets the module-level routing-armed guard (once that

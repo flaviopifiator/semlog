@@ -17,7 +17,7 @@
 [![Django 3.2.9+](https://img.shields.io/badge/Django-%E2%89%A5%203.2.9-092E20?logo=django&logoColor=white)](.github/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](pyproject.toml)
-[![Requirements proven: 94/94](https://img.shields.io/badge/requirements%20proven-94%2F94-brightgreen)](STANDARDS.md)
+[![Requirements proven: 103/103](https://img.shields.io/badge/requirements%20proven-103%2F103-brightgreen)](STANDARDS.md)
 <!-- Enable after the first PyPI release:
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
 -->

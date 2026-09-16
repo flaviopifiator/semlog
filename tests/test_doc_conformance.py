@@ -23,6 +23,7 @@ import contextlib
 import inspect
 import io
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -44,6 +45,7 @@ STANDARDS_PATH = REPO_ROOT / "STANDARDS.md"
 AGENTS_PATH = REPO_ROOT / "AGENTS.md"
 PYPROJECT_PATH = REPO_ROOT / "pyproject.toml"
 BENCHMARK_DIR = REPO_ROOT / "benchmark"
+CHANGELOG_PATH = REPO_ROOT / "CHANGELOG.md"
 
 
 def _standards_text():
@@ -422,8 +424,11 @@ class Cp005ResultsWithheldTests(unittest.TestCase):
                 self.assertIn(phrase, span)
 
     def test_no_document_publishes_benchmark_results(self):
+        # CHANGELOG.md is included per CP-019's extension of this same
+        # figure-detector coverage (WU6): CP-005's own three documents were
+        # already covered before that extension.
         documents = [labels["path"] for labels in READMES.values()]
-        for path in documents + [BENCHMARKS_PATH]:
+        for path in documents + [BENCHMARKS_PATH, CHANGELOG_PATH]:
             with self.subTest(document=path.name):
                 text = path.read_text(encoding="utf-8")
                 self.assertEqual([], _published_benchmark_results(text))
@@ -494,6 +499,78 @@ class Cp005ResultsWithheldTests(unittest.TestCase):
                 self.assertEqual(
                     [], _readme_performance_problems(readme_text(language))
                 )
+
+
+def _tracked_files(root):
+    """Repository-relative paths Git tracks under `root` (same `git
+    ls-files` approach as `tests/test_text_hygiene.py::tracked_files`,
+    kept as an independent, module-local copy rather than a cross-`test*.py`
+    import, matching this repository's helper-module convention)."""
+    try:
+        listing = subprocess.run(
+            ["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return sorted(
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*")
+            if path.is_file()
+        )
+    return sorted(name for name in listing.decode("utf-8").split("\0") if name)
+
+
+class Cp019InternalBenchmarkUntrackedTests(unittest.TestCase):
+    """Proves: CP-019
+
+    CP-019's internal per-mode performance comparison MUST be produced
+    entirely outside the repository: neither its script nor its measured
+    results MUST be tracked by version control, and no figure from it MUST
+    appear in any tracked documentation, including CHANGELOG.md (a
+    coverage CP-005's own figure detector did not previously exercise --
+    see `test_no_document_publishes_benchmark_results` above). The
+    sentinel content marker checked below is built from parts at runtime,
+    never written as one literal string, so this test module itself can
+    never accidentally satisfy its own "absent from every tracked file"
+    check for the wrong reason (matching a literal instead of proving
+    absence)."""
+
+    @staticmethod
+    def _content_marker():
+        # Built from parts, never written as one literal (ruff's FLY002
+        # would otherwise suggest collapsing this back into the literal
+        # this test exists to avoid).
+        return "-".join(  # noqa: FLY002
+            ("cp019", "internal", "benchmark", "content", "marker")
+        )
+
+    def test_no_tracked_path_or_text_contains_the_benchmark_content_marker(self):
+        marker = self._content_marker()
+        offenders = []
+        for name in _tracked_files(REPO_ROOT):
+            if marker in name:
+                offenders.append(f"path: {name}")
+                continue
+            path = REPO_ROOT / name
+            if not path.is_file():
+                continue
+            try:
+                text = path.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue
+            if marker in text:
+                offenders.append(f"text: {name}")
+        self.assertEqual([], offenders)
+
+    def test_cp005_figure_detector_finds_nothing_in_changelog(self):
+        text = CHANGELOG_PATH.read_text(encoding="utf-8")
+        self.assertEqual([], _published_benchmark_results(text))
+
+    def test_cp019_span_states_the_untracked_and_no_figure_rules(self):
+        span = _span(_standards_text(), "CP-019")
+        self.assertIn("MUST NOT be tracked", span)
+        self.assertIn("MUST NOT appear", span)
+        self.assertIn("CHANGELOG.md", span)
+        self.assertIn("content marker", span)
 
 
 def _find_import_offenders(root, allowed_third_party):

@@ -4,8 +4,12 @@ scoping that comes with it (LP-010, scoped to `full` mode only).
 Precedence: explicit `configure(mode=...)` parameter > `SEMLOG_MODE`
 environment variable > `[tool.semlog].mode` in `pyproject.toml` (3.11+
 only, mirroring SI-001/SI-005's existing precedent) > the `"full"`
-default. Any value outside `"full"`/`"hybrid"`/`"off"`, from any source,
-raises `ValueError` naming the invalid value and its source.
+default. A value that is present but outside `"full"`/`"hybrid"`/`"off"`,
+from any source, raises `ValueError` naming the invalid value and its
+source -- except an EMPTY `SEMLOG_MODE`, which is treated as absent and
+falls through to the next source (validate-wu69 #338, m3): an empty
+string under `[tool.semlog].mode` is still a real declared value and
+still raises.
 """
 
 from __future__ import annotations
@@ -30,11 +34,10 @@ def _write_pyproject(directory, mode):
 
 
 class ModeResolutionTests(unittest.TestCase):
-    """`configure(mode=...)` resolution precedence and validation. No
-    `Proves:` line yet: LM-001 is not declared in STANDARDS.md until Phase 7
-    of this change (same deferred-citation precedent as
-    `test_class_budget.py`/`test_source_budget.py`); tag this class
-    `Proves: LM-001` once that declaration lands."""
+    """`configure(mode=...)` resolution precedence and validation.
+
+    Proves: LM-001
+    """
 
     def tearDown(self):
         reset_pipeline()
@@ -42,12 +45,17 @@ class ModeResolutionTests(unittest.TestCase):
         _modes.state.marking = False
 
     def test_explicit_parameter_wins_over_every_other_source(self):
+        # `service_name` is given explicitly (irrelevant to mode
+        # precedence itself) so this full-mode configure() never reaches
+        # the SI-005 pyproject-detection diagnostic, which on Python 3.10
+        # would otherwise leak a real JSON line to the process's actual
+        # stdout during the suite (NIT 2, validate-wu25b #337).
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict("os.environ", {"SEMLOG_MODE": "hybrid"}, clear=True),
         ):
             _write_pyproject(tmp, "off")
-            configure(mode="full", search_dir=tmp)
+            configure(mode="full", service_name="svc", search_dir=tmp)
         self.assertEqual("full", _modes.state.mode)
 
     def test_environment_variable_wins_over_pyproject(self):
@@ -72,13 +80,17 @@ class ModeResolutionTests(unittest.TestCase):
         self.assertEqual("hybrid", _modes.state.mode)
 
     def test_pyproject_mode_skipped_before_3_11(self):
+        # `service_name` avoids `_identity.py`'s own, separately-checked
+        # real `sys.version_info` (only `semlog._modes.sys.version_info` is
+        # mocked here): on an actual 3.10 interpreter this configure() call
+        # would otherwise also hit the SI-005 "no tomllib" diagnostic.
         with (
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict("os.environ", {}, clear=True),
             mock.patch("semlog._modes.sys.version_info", (3, 10, 0, "final", 0)),
         ):
             _write_pyproject(tmp, "hybrid")
-            configure(search_dir=tmp)
+            configure(service_name="svc", search_dir=tmp)
         self.assertEqual("full", _modes.state.mode)
 
     def test_invalid_explicit_parameter_names_the_parameter_as_source(self):
@@ -134,8 +146,38 @@ class ModeResolutionTests(unittest.TestCase):
             tempfile.TemporaryDirectory() as tmp,
             mock.patch.dict("os.environ", {}, clear=True),
         ):
-            configure(search_dir=tmp)
+            configure(service_name="svc", search_dir=tmp)
         self.assertEqual("full", _modes.state.mode)
+
+    def test_empty_semlog_mode_env_var_is_treated_as_absent(self):
+        """validate-wu69 #338, m3: an empty `SEMLOG_MODE` (declared but
+        left blank, a common deployment idiom) falls through to the next
+        source instead of being treated as an invalid value."""
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {"SEMLOG_MODE": ""}, clear=True),
+        ):
+            _write_pyproject(tmp, "hybrid")
+            configure(service_name="svc", search_dir=tmp)
+        expected = "hybrid" if sys.version_info >= (3, 11) else "full"
+        self.assertEqual(expected, _modes.state.mode)
+
+    @unittest.skipUnless(
+        sys.version_info >= (3, 11), "pyproject.toml mode detection needs tomllib"
+    )
+    def test_empty_pyproject_mode_value_raises_value_error(self):
+        """validate-wu69 #338, m3: unlike an empty `SEMLOG_MODE`, an empty
+        string under `[tool.semlog].mode` is a real declared value, not an
+        absent one, and still raises like any other invalid value."""
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.dict("os.environ", {}, clear=True),
+            self.assertRaises(ValueError) as ctx,
+        ):
+            _write_pyproject(tmp, "")
+            configure(service_name="svc", search_dir=tmp)
+        message = str(ctx.exception)
+        self.assertIn("[tool.semlog].mode in pyproject.toml", message)
 
 
 class RootLevelScopeTests(unittest.TestCase):
@@ -158,12 +200,12 @@ class RootLevelScopeTests(unittest.TestCase):
 
     def test_full_mode_sets_the_root_level(self):
         with mock.patch.dict("os.environ", {}, clear=True):
-            configure(mode="full", search_dir=".")
+            configure(mode="full", service_name="svc", search_dir=".")
         self.assertEqual(logging.INFO, self.root.getEffectiveLevel())
 
     def test_hybrid_mode_leaves_the_root_level_untouched(self):
         with mock.patch.dict("os.environ", {}, clear=True):
-            configure(mode="hybrid", search_dir=".")
+            configure(mode="hybrid", service_name="svc", search_dir=".")
         self.assertEqual(logging.WARNING, self.root.level)
 
     def test_off_mode_leaves_the_root_level_untouched(self):
@@ -211,7 +253,10 @@ class ModeStateReloadTests(unittest.TestCase):
 
 class PreConfigureOffTests(unittest.TestCase):
     """`SEMLOG_MODE=off` is read at import time (no file I/O), so it is
-    honored even before `configure()` ever runs (LM-005)."""
+    honored even before `configure()` ever runs.
+
+    Proves: LM-005
+    """
 
     def setUp(self):
         import semlog._context as context_module

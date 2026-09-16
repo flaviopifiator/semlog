@@ -445,11 +445,12 @@ class AgentGuideModesTests(unittest.TestCase):
     """LM-004 (errata 12): the agent guide must document hybrid mode's
     suppression limitation, naming `StreamHandler` as the suppression
     scope and both `QueueHandler`/`QueueListener` and `MemoryHandler` as
-    handlers that may still render a marked record as text. No `Proves:`
-    line yet: LM-004 is not declared in STANDARDS.md until Phase 7 of this
-    change; tag this class `Proves: LM-004` once that declaration lands.
-    The mode/precedence/keyword narrative itself is a later documentation
-    work unit; this class covers only the limitation text landing now."""
+    handlers that may still render a marked record as text. The
+    mode/precedence/keyword narrative itself is a later documentation work
+    unit (WU7); this class covers only the limitation text landing now.
+
+    Proves: LM-004
+    """
 
     def test_guide_documents_the_streamhandler_only_scope(self):
         self.assertIn("StreamHandler", _guide_text())

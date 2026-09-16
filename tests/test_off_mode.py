@@ -7,10 +7,8 @@ diagnostic is silent, including the out-of-scope `bind()` warning
 and `test_log_requests.py`; this module covers the off-specific half
 already landed in an earlier work unit's `_middleware.py` change.
 
-No `Proves:` line yet: LM-005 is not declared in STANDARDS.md until
-Phase 7 of this change (same deferred-citation precedent as
-`test_class_budget.py`/`test_source_budget.py`); tag the relevant
-classes below `Proves: LM-005` once that declaration lands.
+LM-005 (STANDARDS.md, WU6); the relevant classes below carry their own
+`Proves: LM-005` docstring line.
 """
 
 from __future__ import annotations
@@ -45,6 +43,8 @@ def _off_configure():
 
 
 class OffPassThroughTests(unittest.TestCase):
+    """Proves: LM-005"""
+
     def tearDown(self):
         _reset_state()
 
@@ -126,7 +126,10 @@ class OffMiddlewareScopeTests(unittest.TestCase):
     sees exactly the same inert behavior as outside any middleware at
     all, and the middleware never writes a semlog-generated `traceparent`
     into outbound headers. Covers both an inbound `traceparent` and none,
-    since a scope was previously pushed either way."""
+    since a scope was previously pushed either way.
+
+    Proves: LM-005
+    """
 
     def tearDown(self):
         _reset_state()
@@ -305,7 +308,10 @@ class OffDiagnosticsTests(unittest.TestCase):
 
 class OffByteIdentityTests(unittest.TestCase):
     """Subprocess A/B: marked and unmarked calls print byte-identical
-    output in `off` mode, using `%(funcName)s`/`%(lineno)d`."""
+    output in `off` mode, using `%(funcName)s`/`%(lineno)d`.
+
+    Proves: LM-005
+    """
 
     def test_marked_and_unmarked_output_are_byte_identical(self):
         src_dir = str(Path(__file__).resolve().parents[1] / "src")
