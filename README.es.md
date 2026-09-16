@@ -115,7 +115,41 @@ Las firmas completas y su semántica están en la [guía para agentes](src/semlo
 
 ## Recetas para frameworks
 
+Cada framework tiene más de una forma soportada de integrarse, y las rutas no son equivalentes. Todos los ejemplos que siguen son completos y funcionan tal como están.
+
+En todos ellos, `log_requests=True` agrega un evento de finalización `http.server.request` por solicitud: INFO cuando termina bien, ERROR cuando la aplicación lanza una excepción no manejada, con `http.request.method`, `url.path`, `http.response.status_code` y `event.duration` en nanosegundos. Nunca lleva `url.query`. El valor por defecto es `False`, que no agrega ningún evento. En modo `hybrid` ese evento necesita una línea más en la aplicación; ver [Modos](#modos).
+
 ### FastAPI
+
+`ASGIMiddleware` es un middleware ASGI 3.0 puro y no importa FastAPI por su cuenta, así que las dos rutas que siguen se aplican sin cambios a una aplicación Starlette y a cualquier otra aplicación ASGI 3.0.
+
+**Ruta 1, la propia pila de middlewares de la aplicación.**
+
+```python
+import logging
+
+import semlog
+from fastapi import FastAPI
+
+semlog.configure(service_name="my-fastapi-service")
+
+app = FastAPI()
+app.add_middleware(semlog.ASGIMiddleware, log_requests=True)
+
+logger = logging.getLogger(__name__)
+
+
+@app.get("/orders/{order_id}")
+async def get_order(order_id: str):
+    logger.info("order.lookup.started", extra={"app.order.id": order_id})
+    return {"id": order_id}
+```
+
+Un `GET /orders/ord_42` con un `traceparent` entrante imprime el registro propio del punto final y luego el evento de finalización, ambos con el `trace_id`, el `span_id` y el `http.request.id` de esa solicitud.
+
+Hay una advertencia que pertenece solo a esta ruta. Un `@app.exception_handler(Exception)` global se ejecuta dentro del `ServerErrorMiddleware` más externo de Starlette, por encima de la capa que instala `add_middleware` y, por lo tanto, fuera del contexto vigente de semlog: los registros emitidos dentro de ese manejador no llevan `trace_id`, y el evento de finalización ERROR se emite antes de que se envíe la respuesta del manejador, así que su `http.response.status_code` es `null`.
+
+**Ruta 2, envolver la aplicación.**
 
 ```python
 import logging
@@ -127,49 +161,35 @@ from semlog import ASGIMiddleware
 semlog.configure(service_name="my-fastapi-service")
 
 app = FastAPI()
-app = ASGIMiddleware(app, log_requests=True)
-# log_requests=True emits one http.server.request event per request (INFO on
-# success, ERROR when the application raises an unhandled exception), carrying
-# http.request.method, url.path, http.response.status_code and event.duration
-# (nanoseconds). It never includes url.query. Default is False: no extra event.
-
 logger = logging.getLogger(__name__)
 
 
 @app.get("/orders/{order_id}")
 async def get_order(order_id: str):
     logger.info("order.lookup.started", extra={"app.order.id": order_id})
-    ...
+    return {"id": order_id}
 
 
-@app.get("/reports/{report_id}")
-def generate_report_sync(report_id: str):
-    # A sync `def` endpoint also keeps trace context: Starlette runs it in a
-    # threadpool worker with an explicit contextvars.copy_context().
-    logger.info("report.generation.started", extra={"app.report.id": report_id})
-    ...
+app = ASGIMiddleware(app, log_requests=True)
 ```
 
-Equivalente, usando la propia pila de middlewares de FastAPI en lugar de envolver `app`:
+La línea que envuelve va después de registrar las rutas: `ASGIMiddleware` es un invocable ASGI, no una instancia de `FastAPI`, así que un `@app.get(...)` por debajo de ella lanza `AttributeError`. Ahora la capa de semlog es la más externa, de modo que un manejador de excepciones global se ejecuta dentro de su contexto: los registros que emite llevan el `trace_id` de la solicitud, y el evento de finalización lleva el `http.response.status_code` final real.
 
-```python
-app = FastAPI()
-app.add_middleware(semlog.ASGIMiddleware, log_requests=True)
-# A global @app.exception_handler(Exception) runs in Starlette's outermost
-# ServerErrorMiddleware, outside semlog's own bound context: its logs carry
-# no trace_id, and the ERROR completion event has no status code. Wrap
-# `app` instead (above) to keep exception handling inside semlog's context.
-```
+**Cuál elegir.** La ruta 1 si el servicio no tiene un manejador global de `Exception`, o si la pila de middlewares debe seguir bajo el control de FastAPI. La ruta 2 si sí lo tiene y esos registros necesitan el identificador de traza.
+
+Un punto final `def` síncrono conserva el mismo contexto en cualquiera de las dos rutas: Starlette lo ejecuta en un hilo trabajador que hereda el contexto de quien lo llama.
 
 ### Django
 
-Agregue la clase a `settings.MIDDLEWARE`, y llame a `configure()` desde `AppConfig.ready()`, ya que Django aplica su propia configuración de logging durante el arranque, después de leer `settings.py` pero antes de ejecutar `ready()`.
+`configure()` va en un `AppConfig.ready()`, no en `settings.py`. Django lee `settings.py`, luego aplica la configuración de logging del proyecto, y solo después llama a `ready()`. Un proyecto cuyo ajuste `LOGGING` declara una entrada `root`, que es la forma habitual, reemplaza en ese momento los manejadores del logger raíz: una llamada a `configure()` hecha desde `settings.py` pierde su tubería instantes después, el servicio vuelve a imprimir texto plano y el evento de finalización desaparece sin error alguno. Llamada desde `ready()`, se ejecuta después de esa configuración y la sobrevive.
+
+**Ruta 1, la clase de middleware en `settings.MIDDLEWARE`.** Esta es la ruta recomendada.
 
 ```python
 # settings.py
 MIDDLEWARE = [
-    # ... other middleware ...
     "semlog.DjangoMiddleware",
+    # ... other middleware ...
 ]
 ```
 
@@ -190,9 +210,43 @@ Colocada más externa (primera en `MIDDLEWARE`, la recomendación por defecto), 
 
 `process_exception` guarda una excepción de vista no manejada sin absorberla, de modo que el evento de finalización sigue llevando el estado final real y una traza renderizada; el manejo de excepciones propio de Django nunca se modifica. Dos limitaciones permanentes, ninguna es un defecto: no puede observar una excepción lanzada por el propio código de otro middleware, ya que solo una excepción de vista llega hasta él, y un `process_exception` competidor registrado más cerca de la vista puede devolver una respuesta primero, anticipándose por completo al propio hook de semlog para esa solicitud.
 
-Usar la clase junto con `WSGIMiddleware` o `ASGIMiddleware` envolviendo la misma aplicación no está soportado: cada capa analiza el `traceparent` entrante de forma independiente y genera su propio `span_id`, de modo que con el evento de finalización habilitado en ambas, la telemetría se duplica. Use solo una.
+Esa traza se renderiza una sola vez por instancia de excepción. El logger `django.request` propio de Django propaga hacia el logger raíz, así que en un servicio donde queda habilitado registra primero la misma excepción y renderiza allí la traza; el evento de finalización lleva entonces `exception.type` y `exception.message` sin repetirla.
 
-El evento de finalización se habilita mediante el ajuste de Django [`SEMLOG_LOG_REQUESTS`](#semlog_log_requests) en lugar de una palabra clave del constructor, ya que Django instancia una entrada de `MIDDLEWARE` con un único argumento posicional.
+El evento de finalización de esta ruta se habilita mediante el ajuste de Django [`SEMLOG_LOG_REQUESTS`](#semlog_log_requests) en lugar de una palabra clave del constructor, ya que Django instancia una entrada de `MIDDLEWARE` con un único argumento posicional.
+
+**Ruta 2, envolver la aplicación WSGI o la ASGI.** Para un despliegue que prefiere mantener semlog completamente fuera de `MIDDLEWARE`, envuelva el invocable que importe el servidor.
+
+```python
+# wsgi.py
+import os
+
+from django.core.wsgi import get_wsgi_application
+
+import semlog
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mysite.settings")
+
+application = semlog.WSGIMiddleware(get_wsgi_application(), log_requests=True)
+```
+
+```python
+# asgi.py
+import os
+
+from django.core.asgi import get_asgi_application
+
+import semlog
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mysite.settings")
+
+application = semlog.ASGIMiddleware(get_asgi_application(), log_requests=True)
+```
+
+Aquí `configure()` sigue perteneciendo a `AppConfig.ready()`, y `semlog.DjangoMiddleware` se queda fuera de `MIDDLEWARE`. Esta ruta renuncia al detalle de las excepciones, y eso tampoco es un defecto: Django convierte una excepción de vista en una respuesta 500 antes de que el middleware que la envuelve pueda verla, así que al envoltorio no le queda nada que renderizar y no puede adjuntar la traza. Su evento de finalización es un registro INFO con `http.response.status_code` 500 y sin ningún campo `exception.*`, donde la ruta 1 emite un registro ERROR que nombra la excepción. La vinculación del contexto de traza, `http.request.id` y los cuerpos en streaming se comportan igual en las dos.
+
+Hay un detalle del proyecto que pertenece a esta ruta: importa `semlog` antes de que Django lea sus ajustes, así que un proyecto cuyo diccionario `LOGGING` omite `"disable_existing_loggers": False` deshabilita todos los loggers que ya existían, entre ellos el del evento de finalización de semlog, y el evento deja de aparecer sin error alguno. Mantenga esa clave en el diccionario.
+
+**No combine las dos rutas.** Usar la clase junto con `WSGIMiddleware` o `ASGIMiddleware` envolviendo la misma aplicación no está soportado: cada capa analiza el `traceparent` entrante de forma independiente y genera su propio `span_id`, de modo que con el evento de finalización habilitado en ambas, la telemetría se duplica. Use solo una.
 
 ## Configuración
 
@@ -298,6 +352,23 @@ mode = "hybrid"
 ```
 
 Leer `pyproject.toml` necesita `tomllib` de la biblioteca estándar, disponible desde Python 3.11 en adelante. En Python 3.10 esta fuente se omite por completo, y la resolución continúa con la siguiente. El archivo se busca a partir del directorio de trabajo actual (o de `configure(search_dir=...)`, si se indica) y hacia arriba por sus directorios padres. Una imagen de contenedor construida sin el árbol de fuentes del proyecto, o con su directorio de trabajo apuntando a otro lugar, con frecuencia no tiene ningún `pyproject.toml` que encontrar; esa fuente se omite entonces en silencio, igual que en Python 3.10. Una `SEMLOG_MODE` vacía cuenta como ausente y la resolución continúa con la siguiente fuente. `[tool.semlog].mode` es distinto: ahí una cadena vacía es un valor declarado real. Un valor fuera de `"full"`, `"hybrid"` y `"off"`, proveniente de cualquiera de las tres fuentes, lanza `ValueError` nombrando tanto el valor inválido como la fuente de la que proviene.
+
+### El nivel del logger raíz en modo hybrid
+
+`hybrid` nunca toca el logger raíz, deliberadamente, y eso incluye su nivel: la biblioteca estándar lo deja en `WARNING`. El filtrado por severidad de una llamada marcada sigue las reglas de nivel efectivo habituales de la biblioteca estándar, así que en un proceso que nunca definió un nivel para el logger raíz, un registro `INFO` marcado con `semlog=True` se filtra antes de que el enrutamiento de hybrid llegue a verlo, y no se escribe ningún JSON. El evento de finalización `http.server.request` es `INFO` cuando la solicitud termina bien, así que también desaparece, en silencio; el `ERROR`, emitido cuando la aplicación lanza una excepción, sí llega.
+
+`configure(level=...)` no sirve aquí: ese parámetro define el nivel del logger raíz solo en modo `full`. En su lugar, defina el nivel del logger raíz en la aplicación, antes o después de `configure()`:
+
+```python
+import logging
+
+import semlog
+
+logging.getLogger().setLevel(logging.INFO)
+semlog.configure(service_name="checkout", mode="hybrid")
+```
+
+Un servicio que ya llama a `logging.basicConfig(level=logging.INFO)` o aplica su propio `dictConfig` con un nivel para el logger raíz no necesita nada más. El modo `full` no se ve afectado: siempre define un nivel explícito para el logger raíz, `INFO` por defecto.
 
 ### Limitaciones
 

@@ -451,6 +451,70 @@ def modes_narrative_problems(text, language):
     return problems
 
 
+# The root-level trap, as the tokens that carry it: hybrid leaves the root
+# logger's level alone (LP-010), the standard library's default for it is
+# `WARNING`, and the completion event is INFO, so it is filtered out before
+# hybrid's routing ever runs. `configure(level=` is required too: it is the
+# knob a reader would reach for first, and it is exactly the one that does
+# nothing here.
+_ROOT_LEVEL_TOKENS = (
+    "`WARNING`",
+    "`INFO`",
+    "`http.server.request`",
+    "`semlog=True`",
+    "configure(level=",
+)
+_ROOT_LEVEL_FIX = "logging.getLogger().setLevel(logging.INFO)"
+_ROOT_LEVEL_PHRASES = {
+    "en": (
+        "the standard library leaves it at",
+        "set the root level in the application",
+    ),
+    "es": (
+        "la biblioteca estándar lo deja en",
+        "defina el nivel del logger raíz en la aplicación",
+    ),
+}
+
+
+def hybrid_root_level_problems(text, language):
+    """Every way `text`'s root-level subsection under "## Modes"/"## Modos"
+    fails to document the measured `hybrid` trap: with the root logger left
+    at the standard library's default `WARNING`, the INFO completion event
+    and every INFO `semlog=True` call are filtered out before hybrid's own
+    routing runs, and `configure(level=...)` does not change that (empty
+    when it documents all of it). Scoped to the subsection's own span:
+    `WARNING`, `INFO` and `http.server.request` all appear elsewhere in a
+    20+ KB document, so an unscoped check would be vacuous."""
+    labels = READMES[language]
+    try:
+        modes_text = section(text, 2, labels["modes"])
+    except ValueError:
+        return ["no Modes section"]
+    try:
+        root_level_text = section(modes_text, 3, labels["root_level"])
+    except ValueError:
+        return ["no root-logger-level subsection"]
+
+    problems = [
+        f"missing root-level token {token!r}"
+        for token in _ROOT_LEVEL_TOKENS
+        if token not in root_level_text
+    ]
+    problems += [
+        f"missing root-level phrase {phrase!r}"
+        for phrase in _ROOT_LEVEL_PHRASES[language]
+        if phrase not in root_level_text
+    ]
+    if not any(
+        _ROOT_LEVEL_FIX in content
+        for info, content in fenced_blocks(root_level_text)
+        if info == "python"
+    ):
+        problems.append("no python block showing the root-level fix")
+    return problems
+
+
 def env_var_table_problems(text, language):
     """Every way `text`'s "### Precedence and environment variables"/
     "### Precedencia y variables de entorno" subsection fails to keep the
@@ -724,6 +788,93 @@ class ReadmeModesParityTests(unittest.TestCase):
                 self.assertEqual([], env_var_table_problems(text, language))
 
 
+class ReadmeHybridRootLevelTests(unittest.TestCase):
+    """DOC-012's root-level topic, in both editions: `hybrid` deliberately
+    leaves the root logger's level as it found it (LP-010), the standard
+    library's default for that level is `WARNING`, and severity filtering
+    for a marked call follows the standard library's effective-level rules
+    (LM-003), so an INFO record is dropped before hybrid's routing runs.
+    Section-scoped through `hybrid_root_level_problems`, never a
+    whole-file token check.
+
+    Proves: DOC-012
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.texts = {language: readme_text(language) for language in READMES}
+
+    def test_both_editions_document_the_hybrid_root_level_trap(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertEqual([], hybrid_root_level_problems(text, language))
+
+
+class ReadmeHybridRootLevelPerturbationTests(unittest.TestCase):
+    """Every check `hybrid_root_level_problems` performs is demonstrated
+    here to be capable of failing, against deliberately broken in-memory
+    copies of the real README text. The real files are never written to."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.english = readme_text("en")
+        cls.spanish = readme_text("es")
+
+    def test_baseline_has_no_problems(self):
+        self.assertEqual([], hybrid_root_level_problems(self.english, "en"))
+        self.assertEqual([], hybrid_root_level_problems(self.spanish, "es"))
+
+    def test_deleting_the_subsection_entirely_is_caught(self):
+        for language, title in (
+            ("en", READMES["en"]["root_level"]),
+            ("es", READMES["es"]["root_level"]),
+        ):
+            original = readme_text(language)
+            body = section(original, 2, READMES[language]["modes"])
+            subsection = section(body, 3, title)
+            mutated = original.replace(subsection + "\n", "", 1)
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertEqual(
+                    ["no root-logger-level subsection"],
+                    hybrid_root_level_problems(mutated, language),
+                )
+
+    def test_dropping_the_configure_level_token_is_caught(self):
+        mutated = self.english.replace("configure(level=", "the level parameter")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing root-level token 'configure(level='",
+            hybrid_root_level_problems(mutated, "en"),
+        )
+
+    def test_dropping_the_fix_block_is_caught(self):
+        mutated = self.english.replace(_ROOT_LEVEL_FIX, "pass", 1)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "no python block showing the root-level fix",
+            hybrid_root_level_problems(mutated, "en"),
+        )
+
+    def test_a_root_level_phrase_mutated_identically_in_both_editions_is_caught(self):
+        mutated_en = self.english.replace(
+            _ROOT_LEVEL_PHRASES["en"][0], "the library raises it to", 1
+        )
+        mutated_es = self.spanish.replace(
+            _ROOT_LEVEL_PHRASES["es"][0], "la biblioteca lo sube a", 1
+        )
+        self.assertNotEqual(mutated_en, self.english)
+        self.assertNotEqual(mutated_es, self.spanish)
+        self.assertIn(
+            f"missing root-level phrase {_ROOT_LEVEL_PHRASES['en'][0]!r}",
+            hybrid_root_level_problems(mutated_en, "en"),
+        )
+        self.assertIn(
+            f"missing root-level phrase {_ROOT_LEVEL_PHRASES['es'][0]!r}",
+            hybrid_root_level_problems(mutated_es, "es"),
+        )
+
+
 class ReadmeModesPerturbationTests(unittest.TestCase):
     """Every check `modes_narrative_problems` and `env_var_table_problems`
     performs is demonstrated here to be capable of failing, against
@@ -936,9 +1087,47 @@ class ReadmeModesPerturbationTests(unittest.TestCase):
         )
 
 
-_FRAMEWORK_RECIPES_TITLES = {
-    "en": "Framework recipes",
-    "es": "Recetas para frameworks",
+# Every integration route the library actually supports, as the call that
+# carries it. A README that documents one route per framework leaves the
+# reader to guess whether the other one is supported at all, so each is
+# required by name, inside its own framework subsection.
+_FASTAPI_ROUTE_MARKERS = (
+    "app.add_middleware(semlog.ASGIMiddleware, log_requests=True)",
+    "ASGIMiddleware(app, log_requests=True)",
+)
+_DJANGO_ROUTE_MARKERS = (
+    '"semlog.DjangoMiddleware"',
+    "get_wsgi_application()",
+    "get_asgi_application()",
+    "WSGIMiddleware",
+    "ASGIMiddleware",
+    # The wrapper route imports `semlog` before Django reads its settings,
+    # so a project `LOGGING` dictionary without this key disables the
+    # completion event's own logger and the event vanishes silently.
+    "disable_existing_loggers",
+)
+# Choosing between two supported routes is the part a reader cannot
+# reconstruct from the examples alone, so each framework subsection must
+# say it in prose (translated, hence per language).
+_ROUTE_CHOICE_PHRASES = {
+    "en": ("Which one to choose", "Which one to use"),
+    "es": ("Cuál elegir", "Cuál usar"),
+}
+# The measured limit of the Django wrapper route: Django's own exception
+# handling has already produced the 500 response by the time a WSGI/ASGI
+# wrapper sees the request, so the wrapper has no exception to render.
+_DJANGO_WRAPPER_LIMIT_PHRASES = {
+    "en": (
+        "converts a view exception into a 500 response before the wrapper sees it",
+        "cannot attach the traceback",
+    ),
+    "es": (
+        (
+            "convierte una excepción de vista en una respuesta 500 antes de que el "
+            "middleware que la envuelve pueda verla"
+        ),
+        "no puede adjuntar la traza",
+    ),
 }
 _DJANGO_PLACEMENT_MARKERS = {
     "en": (
@@ -980,15 +1169,18 @@ _DJANGO_COEXISTENCE_MARKERS = {
 
 def framework_recipes_narrative_problems(text, language):
     """Every way `text`'s "## Framework recipes"/"## Recetas para
-    frameworks" section fails to prove HTM-009's placement/tradeoff
-    narrative, HTM-010's unsupported-coexistence note, HTM-011/HTM-012's
-    process_exception behavior and permanent limitations, and the
-    FastAPI `add_middleware` recipe's exception-handler caveat (empty
-    when it proves everything). Scoped to the section's own span, never
-    a whole-document check (matching `modes_narrative_problems`'s own
-    established pattern)."""
+    frameworks" section fails to prove DOC-012's integration-route
+    coverage (every supported route for each framework, with the note
+    saying which to choose), HTM-009's placement/tradeoff narrative,
+    HTM-010's unsupported-coexistence note, HTM-011/HTM-012's
+    process_exception behavior and permanent limitations, the FastAPI
+    `add_middleware` recipe's exception-handler caveat, and the Django
+    wrapper route's own measured limit (empty when it proves
+    everything). Scoped to the section's own span, never a whole-document
+    check (matching `modes_narrative_problems`'s own established
+    pattern)."""
     try:
-        recipes_text = section(text, 2, _FRAMEWORK_RECIPES_TITLES[language])
+        recipes_text = section(text, 2, READMES[language]["recipes"])
     except ValueError:
         return ["no Framework recipes section"]
 
@@ -998,14 +1190,17 @@ def framework_recipes_narrative_problems(text, language):
     except ValueError:
         problems.append("no FastAPI subsection")
         fastapi_text = ""
-    if "add_middleware" not in fastapi_text:
-        problems.append("missing add_middleware recipe")
+    for marker in _FASTAPI_ROUTE_MARKERS:
+        if marker not in fastapi_text:
+            problems.append(f"missing FastAPI route {marker!r}")
     if "ServerErrorMiddleware" not in fastapi_text:
         problems.append(
             "missing exception-handler caveat's ServerErrorMiddleware mention"
         )
     if "trace_id" not in fastapi_text:
         problems.append("missing the no-trace_id exception-handler caveat")
+    if not any(phrase in fastapi_text for phrase in _ROUTE_CHOICE_PHRASES[language]):
+        problems.append("missing the FastAPI which-route-to-choose note")
 
     try:
         django_text = section(recipes_text, 3, "Django")
@@ -1013,8 +1208,9 @@ def framework_recipes_narrative_problems(text, language):
         problems.append("no Django subsection")
         return problems
 
-    if '"semlog.DjangoMiddleware"' not in django_text:
-        problems.append("missing the settings.MIDDLEWARE recipe")
+    for marker in _DJANGO_ROUTE_MARKERS:
+        if marker not in django_text:
+            problems.append(f"missing Django route {marker!r}")
     if "AppConfig" not in django_text or "ready(self)" not in django_text:
         problems.append("missing the AppConfig.ready() configure() placement")
     for marker in _DJANGO_PLACEMENT_MARKERS[language]:
@@ -1025,6 +1221,9 @@ def framework_recipes_narrative_problems(text, language):
     for marker in _DJANGO_LIMITATION_MARKERS[language]:
         if marker not in django_text:
             problems.append(f"missing permanent-limitation marker {marker!r}")
+    for phrase in _DJANGO_WRAPPER_LIMIT_PHRASES[language]:
+        if phrase not in django_text:
+            problems.append(f"missing wrapper-route limit {phrase!r}")
     for marker in _DJANGO_COEXISTENCE_MARKERS[language]:
         if marker not in django_text:
             problems.append(f"missing coexistence marker {marker!r}")
@@ -1052,12 +1251,16 @@ def semlog_log_requests_section_problems(text, language):
 
 
 class ReadmeFrameworkRecipesParityTests(unittest.TestCase):
-    """The Django recipe's outermost-placement recommendation and tradeoff
-    (HTM-009), the unsupported WSGI/ASGI coexistence note (HTM-010), the
+    """Every supported integration route for each framework, with the note
+    saying which to choose (DOC-012): for FastAPI, `add_middleware` and
+    wrapping the application, each with its exception-handler caveat; for
+    Django, the `settings.MIDDLEWARE` class and wrapping
+    `get_wsgi_application()`/`get_asgi_application()`, with the latter's
+    own measured limit. Plus the outermost-placement recommendation and
+    tradeoff (HTM-009), the unsupported coexistence note (HTM-010), the
     process_exception behavior and its permanent limitations (HTM-011,
-    HTM-012), and the FastAPI `add_middleware` recipe with its exception-
-    handler caveat, in both editions, plus the `SEMLOG_LOG_REQUESTS`
-    subsection under Configuration. Every assertion is section-scoped
+    HTM-012), in both editions, and the `SEMLOG_LOG_REQUESTS` subsection
+    under Configuration. Every assertion is section-scoped
     (`framework_recipes_narrative_problems`), never a whole-file check.
 
     Proves: DOC-012, HTM-009
@@ -1103,28 +1306,79 @@ class ReadmeFrameworkRecipesPerturbationTests(unittest.TestCase):
         )
         self.assertNotEqual(mutated, self.english)
         self.assertIn(
-            "missing add_middleware recipe",
+            "missing FastAPI route "
+            "'app.add_middleware(semlog.ASGIMiddleware, log_requests=True)'",
             framework_recipes_narrative_problems(mutated, "en"),
         )
 
-    def test_removing_the_exception_handler_caveat_is_caught(self):
-        mutated = self.english.replace(
-            "# A global @app.exception_handler(Exception) runs in Starlette's outermost\n"
-            "# ServerErrorMiddleware, outside semlog's own bound context: its logs carry\n"
-            "# no trace_id, and the ERROR completion event has no status code. Wrap\n"
-            "# `app` instead (above) to keep exception handling inside semlog's context.\n",
-            "",
-            1,
+    def test_removing_the_fastapi_wrapper_recipe_is_caught(self):
+        # The second supported route: documenting only `add_middleware`
+        # leaves the reader with the variant whose exception handler runs
+        # outside semlog's own context, and no way to know there is another.
+        mutated = self.english.replace("ASGIMiddleware(app, log_requests=True)", "")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing FastAPI route 'ASGIMiddleware(app, log_requests=True)'",
+            framework_recipes_narrative_problems(mutated, "en"),
         )
+
+    def test_removing_the_route_choice_note_is_caught(self):
+        for language, phrases in _ROUTE_CHOICE_PHRASES.items():
+            original = readme_text(language)
+            mutated = original
+            for phrase in phrases:
+                mutated = mutated.replace(phrase, "Note")
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    "missing the FastAPI which-route-to-choose note",
+                    framework_recipes_narrative_problems(mutated, language),
+                )
+
+    def test_removing_the_django_wrapper_route_is_caught(self):
+        mutated = self.english.replace("get_asgi_application()", "the ASGI callable")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing Django route 'get_asgi_application()'",
+            framework_recipes_narrative_problems(mutated, "en"),
+        )
+
+    def test_removing_the_disable_existing_loggers_note_is_caught(self):
+        for language in READMES:
+            original = readme_text(language)
+            mutated = original.replace("disable_existing_loggers", "that key")
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    "missing Django route 'disable_existing_loggers'",
+                    framework_recipes_narrative_problems(mutated, language),
+                )
+
+    def test_removing_the_django_wrapper_limit_in_both_editions_is_caught(self):
+        for language, phrases in _DJANGO_WRAPPER_LIMIT_PHRASES.items():
+            original = readme_text(language)
+            mutated = original.replace(phrases[0], "does nothing unusual", 1)
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    f"missing wrapper-route limit {phrases[0]!r}",
+                    framework_recipes_narrative_problems(mutated, language),
+                )
+
+    def test_removing_the_exception_handler_caveat_is_caught(self):
+        # The caveat is prose, not a code comment: a code block is
+        # byte-identical across editions, so a caveat written inside one
+        # reaches a Spanish reader in English only.
+        mutated = self.english.replace("ServerErrorMiddleware", "the outer layer")
         self.assertNotEqual(mutated, self.english)
         problems = framework_recipes_narrative_problems(mutated, "en")
-        self.assertTrue(any("ServerErrorMiddleware" in p for p in problems))
+        self.assertTrue(any("ServerErrorMiddleware" in p for p in problems), problems)
 
     def test_removing_the_django_middleware_list_entry_is_caught(self):
         mutated = self.english.replace('"semlog.DjangoMiddleware"', "", 1)
         self.assertNotEqual(mutated, self.english)
         self.assertIn(
-            "missing the settings.MIDDLEWARE recipe",
+            "missing Django route '\"semlog.DjangoMiddleware\"'",
             framework_recipes_narrative_problems(mutated, "en"),
         )
 

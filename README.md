@@ -115,7 +115,41 @@ Full signatures and semantics are in the [agent guide](src/semlog/agent_guide.md
 
 ## Framework recipes
 
+Each framework has more than one supported way in, and the routes are not equivalent. Every example below is complete and runs as it stands.
+
+In all of them, `log_requests=True` adds one `http.server.request` completion event per request: INFO on success, ERROR when the application raises an unhandled exception, carrying `http.request.method`, `url.path`, `http.response.status_code` and `event.duration` in nanoseconds. It never carries `url.query`. The default is `False`, which adds no event. In `hybrid` mode that event needs one more line in the application; see [Modes](#modes).
+
 ### FastAPI
+
+`ASGIMiddleware` is a pure ASGI 3.0 middleware with no FastAPI import of its own, so both routes below apply unchanged to a plain Starlette application and to any other ASGI 3.0 application.
+
+**Route 1, the application's own middleware stack.**
+
+```python
+import logging
+
+import semlog
+from fastapi import FastAPI
+
+semlog.configure(service_name="my-fastapi-service")
+
+app = FastAPI()
+app.add_middleware(semlog.ASGIMiddleware, log_requests=True)
+
+logger = logging.getLogger(__name__)
+
+
+@app.get("/orders/{order_id}")
+async def get_order(order_id: str):
+    logger.info("order.lookup.started", extra={"app.order.id": order_id})
+    return {"id": order_id}
+```
+
+A `GET /orders/ord_42` carrying an inbound `traceparent` prints the endpoint's own record and then the completion event, both with that request's `trace_id`, `span_id` and `http.request.id`.
+
+One caveat belongs to this route alone. A global `@app.exception_handler(Exception)` runs inside Starlette's outermost `ServerErrorMiddleware`, above the layer `add_middleware` installs and therefore outside semlog's bound context: records logged inside that handler carry no `trace_id`, and the ERROR completion event is emitted before the handler's response is sent, so its `http.response.status_code` is `null`.
+
+**Route 2, wrapping the application.**
 
 ```python
 import logging
@@ -127,49 +161,35 @@ from semlog import ASGIMiddleware
 semlog.configure(service_name="my-fastapi-service")
 
 app = FastAPI()
-app = ASGIMiddleware(app, log_requests=True)
-# log_requests=True emits one http.server.request event per request (INFO on
-# success, ERROR when the application raises an unhandled exception), carrying
-# http.request.method, url.path, http.response.status_code and event.duration
-# (nanoseconds). It never includes url.query. Default is False: no extra event.
-
 logger = logging.getLogger(__name__)
 
 
 @app.get("/orders/{order_id}")
 async def get_order(order_id: str):
     logger.info("order.lookup.started", extra={"app.order.id": order_id})
-    ...
+    return {"id": order_id}
 
 
-@app.get("/reports/{report_id}")
-def generate_report_sync(report_id: str):
-    # A sync `def` endpoint also keeps trace context: Starlette runs it in a
-    # threadpool worker with an explicit contextvars.copy_context().
-    logger.info("report.generation.started", extra={"app.report.id": report_id})
-    ...
+app = ASGIMiddleware(app, log_requests=True)
 ```
 
-Equivalent, using FastAPI's own middleware stack instead of wrapping `app`:
+The wrapping line goes after the routes are registered: `ASGIMiddleware` is an ASGI callable, not a `FastAPI` instance, so an `@app.get(...)` below it raises `AttributeError`. semlog's layer is now the outermost one, so a global exception handler runs inside its context: the records it logs carry the request's `trace_id`, and the completion event carries the real final `http.response.status_code`.
 
-```python
-app = FastAPI()
-app.add_middleware(semlog.ASGIMiddleware, log_requests=True)
-# A global @app.exception_handler(Exception) runs in Starlette's outermost
-# ServerErrorMiddleware, outside semlog's own bound context: its logs carry
-# no trace_id, and the ERROR completion event has no status code. Wrap
-# `app` instead (above) to keep exception handling inside semlog's context.
-```
+**Which one to choose.** Route 1 if the service has no global `Exception` handler, or if the middleware stack has to stay under FastAPI's own control. Route 2 if it does have one and those records need the trace id.
+
+A sync `def` endpoint keeps the same context under either route: Starlette runs it in a worker thread that inherits the caller's context.
 
 ### Django
 
-Add the class to `settings.MIDDLEWARE`, and call `configure()` from `AppConfig.ready()`, since Django applies its own logging configuration during startup, after `settings.py` is read but before `ready()` runs.
+`configure()` goes in an `AppConfig.ready()`, not in `settings.py`. Django reads `settings.py`, then applies the project's logging configuration, and only afterwards calls `ready()`. A project whose `LOGGING` setting declares a `root` entry, the common shape, has its root handlers replaced at that point: a `configure()` call made from `settings.py` loses its pipeline moments later, the service goes back to printing plain text, and the completion event disappears with no error anywhere. Called from `ready()`, it runs after that configuration and survives it.
+
+**Route 1, the middleware class in `settings.MIDDLEWARE`.** This is the recommended route.
 
 ```python
 # settings.py
 MIDDLEWARE = [
-    # ... other middleware ...
     "semlog.DjangoMiddleware",
+    # ... other middleware ...
 ]
 ```
 
@@ -190,9 +210,43 @@ Placed outermost (first in `MIDDLEWARE`, the default recommendation), it covers 
 
 `process_exception` stashes an unhandled view exception without swallowing it, so the completion event still carries the real final status and a rendered traceback; Django's own exception handling is never modified. Two permanent limitations, neither a defect: it cannot observe an exception raised by another middleware's own code, since only a view exception ever reaches it, and a competing `process_exception` registered closer to the view can return a response first, pre-empting semlog's own hook for that request entirely.
 
-Using the class together with `WSGIMiddleware` or `ASGIMiddleware` wrapping the same application is unsupported: each layer parses the inbound `traceparent` independently and mints its own `span_id`, so with the completion event enabled on both, telemetry is duplicated. Use exactly one.
+That traceback is rendered once per exception instance. Django's own `django.request` logger propagates to the root logger, so in a service where it is left enabled it logs the same exception first and renders the traceback there; the completion event then carries `exception.type` and `exception.message` without repeating it.
 
-The completion event is enabled through the Django setting [`SEMLOG_LOG_REQUESTS`](#semlog_log_requests) instead of a constructor keyword, since Django instantiates a `MIDDLEWARE` entry with a single positional argument.
+This route's completion event is enabled through the Django setting [`SEMLOG_LOG_REQUESTS`](#semlog_log_requests) instead of a constructor keyword, since Django instantiates a `MIDDLEWARE` entry with a single positional argument.
+
+**Route 2, wrapping the WSGI or the ASGI application.** For a deployment that prefers to keep semlog outside `MIDDLEWARE` entirely, wrap whichever callable the server imports.
+
+```python
+# wsgi.py
+import os
+
+from django.core.wsgi import get_wsgi_application
+
+import semlog
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mysite.settings")
+
+application = semlog.WSGIMiddleware(get_wsgi_application(), log_requests=True)
+```
+
+```python
+# asgi.py
+import os
+
+from django.core.asgi import get_asgi_application
+
+import semlog
+
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "mysite.settings")
+
+application = semlog.ASGIMiddleware(get_asgi_application(), log_requests=True)
+```
+
+`configure()` still belongs in `AppConfig.ready()` here, and `semlog.DjangoMiddleware` stays out of `MIDDLEWARE`. This route gives up exception detail, and that is not a defect either: Django converts a view exception into a 500 response before the wrapper sees it, so the wrapper has nothing left to render and cannot attach the traceback. Its completion event is an INFO record carrying `http.response.status_code` 500 and no `exception.*` field at all, where route 1 emits an ERROR record naming the exception. Trace context binding, `http.request.id` and streaming bodies behave identically in both.
+
+One project-side detail belongs to this route: it imports `semlog` before Django reads its settings, so a project whose `LOGGING` dictionary omits `"disable_existing_loggers": False` disables every logger that already existed, semlog's completion-event logger among them, and the event stops appearing with no error. Keep that key in the dictionary.
+
+**Do not combine the two routes.** Using the class together with `WSGIMiddleware` or `ASGIMiddleware` wrapping the same application is unsupported: each layer parses the inbound `traceparent` independently and mints its own `span_id`, so with the completion event enabled on both, telemetry is duplicated. Use exactly one.
 
 ## Configuration
 
@@ -298,6 +352,23 @@ mode = "hybrid"
 ```
 
 Reading `pyproject.toml` needs the standard library's `tomllib`, available on Python 3.11 and later. On Python 3.10 this source is skipped entirely, and resolution falls through to the next one. The file is searched from the current working directory (or `configure(search_dir=...)`, when given) and upward through its parent directories. A container image built without the project's source tree, or with its working directory set elsewhere, often has no `pyproject.toml` to find; that source is then skipped silently, the same as on Python 3.10. An empty `SEMLOG_MODE` counts as absent and falls through to the next source. `[tool.semlog].mode` is different: there, an empty string is a real declared value. A value outside `"full"`, `"hybrid"` and `"off"`, from any of the three sources, raises `ValueError` naming both the invalid value and the source it came from.
+
+### The root logger level in hybrid mode
+
+`hybrid` deliberately never touches the root logger, its level included, and the standard library leaves it at `WARNING`. Severity filtering for a marked call follows the standard library's ordinary effective-level rules, so in a process that has never set a root level, an `INFO` record marked `semlog=True` is filtered out before hybrid's routing ever sees it, and no JSON is written. The `http.server.request` completion event is `INFO` on a successful request, so it disappears too, silently; the `ERROR` one, emitted when the application raises, still comes through.
+
+`configure(level=...)` does not help: that parameter sets the root level in `full` mode only. Instead, set the root level in the application, before or after `configure()`:
+
+```python
+import logging
+
+import semlog
+
+logging.getLogger().setLevel(logging.INFO)
+semlog.configure(service_name="checkout", mode="hybrid")
+```
+
+A service that already calls `logging.basicConfig(level=logging.INFO)` or applies its own `dictConfig` with a root level needs nothing extra. `full` mode is unaffected: it always sets an explicit root level, `INFO` by default.
 
 ### Limitations
 
