@@ -1,18 +1,12 @@
-"""SEMLOG: a stdlib-only structured logging library (CP-015, 8 public
-names once every phase lands); ``__all__`` never lists a name before it
-exists."""
+"""SEMLOG: a stdlib-only structured logging library (CP-015, 9 public
+names); ``__all__`` never lists a name before it exists."""
 
 from __future__ import annotations
 
 from ._config import configure
 from ._context import bind, inject, operation
 from ._identity import _dist_version
-from ._middleware import ASGIMiddleware, WSGIMiddleware
-
-# HTM-008: exported ahead of `__all__`, which stays at eight names until
-# task 5.9 grows it to nine; the redundant alias is ruff's own documented
-# way to mark a re-export as intentional without touching `__all__` yet.
-from ._middleware import DjangoMiddleware as DjangoMiddleware
+from ._middleware import ASGIMiddleware, DjangoMiddleware, WSGIMiddleware
 from ._transport import flush
 
 # The only code copy of the semconv version pinned in STANDARDS.md §4 (design
@@ -42,6 +36,7 @@ __all__: tuple[str, ...] = (  # noqa: RUF022
     "configure",
     "WSGIMiddleware",
     "ASGIMiddleware",
+    "DjangoMiddleware",
     "operation",
     "bind",
     "inject",

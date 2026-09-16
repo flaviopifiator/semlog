@@ -21,7 +21,15 @@ import unittest
 from pathlib import Path
 
 import semlog
-from semlog import ASGIMiddleware, WSGIMiddleware, bind, configure, inject, operation
+from semlog import (
+    ASGIMiddleware,
+    DjangoMiddleware,
+    WSGIMiddleware,
+    bind,
+    configure,
+    inject,
+    operation,
+)
 from semlog._transport import flush
 
 from .test_output_schema import SCHEMA, validate_record
@@ -35,6 +43,7 @@ _PUBLIC_OBJECTS = {
     "configure": configure,
     "WSGIMiddleware": WSGIMiddleware,
     "ASGIMiddleware": ASGIMiddleware,
+    "DjangoMiddleware": DjangoMiddleware,
     "operation": operation,
     "bind": bind,
     "inject": inject,
@@ -403,13 +412,23 @@ def _h2_heading_overlap(agents_text, guide_text):
     return agents_h2 & guide_h2
 
 
+# CP-017's removed numeric budgets (framework-middlewares change, decisions
+# #345/#347): the hard-rules section must not restate either one.
+_REMOVED_BUDGET_MARKERS = ("1,500", "1500 non-blank", "at most 6 classes", "6 classes,")
+
+
+def _stale_budget_markers(text):
+    return [marker for marker in _REMOVED_BUDGET_MARKERS if marker in text]
+
+
 class AgentsMdConformanceTests(unittest.TestCase):
     """Proves: DOC-010
 
     A6 (design-decisions #170 §17.5/§17.6): AGENTS.md carries the exact
     setup/test/lint/format/build commands (and their `pip`/plain fallbacks),
-    links to STANDARDS.md, the guide and llms.txt, and shares no H2 heading
-    with the guide (no content duplication)."""
+    links to STANDARDS.md, the guide and llms.txt, shares no H2 heading
+    with the guide (no content duplication), and no longer states either
+    numeric budget CP-017 removed."""
 
     @classmethod
     def setUpClass(cls):
@@ -423,6 +442,9 @@ class AgentsMdConformanceTests(unittest.TestCase):
 
     def test_no_h2_heading_duplicates_the_guide(self):
         self.assertEqual(set(), _h2_heading_overlap(self.text, _guide_text()))
+
+    def test_hard_rules_no_longer_state_a_removed_numeric_budget(self):
+        self.assertEqual([], _stale_budget_markers(self.text))
 
 
 # ---------------------------------------------------------------------------
@@ -773,6 +795,15 @@ class PerturbationProofTests(unittest.TestCase):
         self.assertNotEqual(mutated, self.agents_md_text, "fixture setup: no match")
         overlap = _h2_heading_overlap(mutated, self.guide_text)
         self.assertIn("Public API", overlap)
+
+    def test_a6_catches_a_reintroduced_numeric_budget(self):
+        mutated = self.agents_md_text.replace(
+            "The public surface is exactly 9 names.",
+            "The public surface is exactly 9 names. At most 1,500 lines.",
+            1,
+        )
+        self.assertNotEqual(mutated, self.agents_md_text, "fixture setup: no match")
+        self.assertIn("1,500", _stale_budget_markers(mutated))
 
     # -- A8: guide size budget -------------------------------------------
 

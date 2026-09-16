@@ -1,8 +1,7 @@
 """Benchmark harness for SEMLOG (STANDARDS.md CP-005/CP-006/CP-007/CP-012).
 
-Lives outside `src/semlog`: this package is never counted toward CP-017's
-1,500-line package-source budget (that budget scopes `src/semlog/*.py`
-only; see `tests/test_source_budget.py`), and it ships in neither the
+Lives outside `src/semlog`: this package is not part of
+the library's own source tree, and it ships in neither the
 sdist tree the library publishes as its contract nor the built wheel.
 
 Stdlib-only measurement tools throughout (`time.perf_counter_ns`,

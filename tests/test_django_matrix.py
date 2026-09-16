@@ -263,11 +263,11 @@ class _DjangoMiddlewareTestCase(unittest.TestCase):
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoMiddlewareRegistrationTests(_DjangoMiddlewareTestCase):
-    """Registers the class through a dotted path in `settings.MIDDLEWARE`;
+    """Proves: HTM-008
+
+    Registers the class through a dotted path in `settings.MIDDLEWARE`;
     a sync view served over WSGI propagates the inbound W3C trace context,
-    and two sequential requests never leak context into each other. No
-    `Proves:` line yet: the citation waits for STANDARDS.md's own
-    HTM-008 entry (phase 5)."""
+    and two sequential requests never leak context into each other."""
 
     def test_dotted_path_in_middleware_binds_a_sync_view_over_wsgi(self):
         status, _body = self._wsgi_get("/sync/", _TRACE_A)
@@ -302,11 +302,11 @@ def _is_coroutine_like(obj):
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoMiddlewareAsyncMarkingTests(_DjangoMiddlewareTestCase):
-    """An async `get_response` marks the instance coroutine-like, a sync
+    """Proves: HTM-008
+
+    An async `get_response` marks the instance coroutine-like, a sync
     one leaves it unmarked, and `__acall__` runs on the same thread that
-    started the event loop -- no `sync_to_async` hop. No `Proves:` line
-    yet: the citation waits for STANDARDS.md's own HTM-008 entry
-    (phase 5)."""
+    started the event loop -- no `sync_to_async` hop."""
 
     def test_async_get_response_marks_the_instance_as_coroutine_like(self):
         from semlog import DjangoMiddleware
@@ -342,14 +342,11 @@ class DjangoMiddlewareAsyncMarkingTests(_DjangoMiddlewareTestCase):
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoMiddlewareModeTests(_DjangoMiddlewareTestCase):
-    """Proves: LM-005
+    """Proves: LM-005, HTM-008
 
     `off` mode binds nothing and the wrapped view still runs, matching
     the existing WSGI/ASGI guarantee; `full`/`hybrid` still bind the
-    inbound trace id. The Django-specific request event's own off-mode
-    parity (HTM-011) has no dedicated test yet: it lands with the event
-    itself in a later work unit, and has no `Proves:` citation yet
-    either, pending STANDARDS.md's own HTM-011 entry (phase 5)."""
+    inbound trace id, reproducing HTM-008's own mode-parity clause."""
 
     def test_off_mode_binds_nothing_and_still_calls_the_view(self):
         from django.http import HttpResponse
@@ -411,12 +408,12 @@ class DjangoMiddlewareModeTests(_DjangoMiddlewareTestCase):
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoMiddlewareExceptionTests(_DjangoMiddlewareTestCase):
-    """`process_exception` stashes the exception without swallowing it: a
+    """Proves: HTM-011
+
+    `process_exception` stashes the exception without swallowing it: a
     raising view still produces Django's own 500 response, and (with the
     completion event enabled) exactly one ERROR `http.server.request`
-    record carries the real final status and a rendered traceback. No
-    `Proves:` line yet: waits for STANDARDS.md's own HTM-011 entry
-    (phase 5)."""
+    record carries the real final status and a rendered traceback."""
 
     middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
     service_name = "django-exception"
@@ -459,13 +456,77 @@ class DjangoMiddlewareExceptionTests(_DjangoMiddlewareTestCase):
 
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
+class DjangoMiddlewareExceptionVisibilityTests(_DjangoMiddlewareTestCase):
+    """Proves: HTM-012
+
+    `process_exception` cannot observe an exception raised by another
+    middleware's own code (not the view): that middleware's own
+    `convert_exception_to_response` wrapper converts it before this
+    middleware is ever reached. A competing `process_exception` closer to
+    the view can also pre-empt this middleware's own hook entirely, by
+    returning a non-`None` response first in Django's exception-
+    middleware loop. Neither is a defect: both are permanent structural
+    limitations of Django's own dispatch, confirmation-only against the
+    already-landed `process_exception` implementation -- no production
+    change is expected here."""
+
+    def test_another_middlewares_own_exception_is_invisible(self):
+        from django.test import override_settings
+
+        with override_settings(
+            MIDDLEWARE=[
+                "tests._django_matrix_middleware.crashing_middleware",
+                "tests._django_matrix_middleware.django_middleware_logging",
+            ]
+        ):
+            status, _body = self._wsgi_get("/sync/")
+        self.assertEqual("500 Internal Server Error", status)
+        events = [
+            line
+            for line in self._lines()
+            if line.get("event_name") == "http.server.request"
+        ]
+        self.assertEqual(0, len(events))
+
+    def test_a_competing_process_exception_preempts_semlogs_own(self):
+        from django.test import override_settings
+
+        with override_settings(
+            MIDDLEWARE=[
+                "tests._django_matrix_middleware.django_middleware_logging",
+                "tests._django_matrix_middleware.preempting_middleware",
+            ]
+        ):
+            status, body = self._wsgi_get("/boom/")
+        self.assertTrue(status.startswith("599"))
+        self.assertIn(b"preempted", body)
+        events = [
+            line
+            for line in self._lines()
+            if line.get("event_name") == "http.server.request"
+        ]
+        # The completion event itself still fires (log_requests=True is
+        # independent of process_exception), but it carries no exception
+        # info and reports the pre-empting response's own real final
+        # status -- proof that semlog's OWN process_exception was never
+        # invoked for this request; it would have stashed exception info
+        # otherwise, exactly like DjangoMiddlewareExceptionTests proves
+        # when nothing pre-empts it.
+        self.assertEqual(1, len(events))
+        self.assertEqual("INFO", events[0]["severity_text"])
+        self.assertNotIn("exception.stacktrace", events[0])
+        self.assertEqual(599, events[0]["http.response.status_code"])
+
+
+@unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoMiddlewareCoexistenceTests(_DjangoMiddlewareTestCase):
-    """Using the class together with `WSGIMiddleware` wrapping the same
+    """Proves: HTM-010
+
+    Using the class together with `WSGIMiddleware` wrapping the same
     application is not blocked at runtime: each layer parses the inbound
     `traceparent` independently and mints its own `span_id`, so with
     `log_requests=True` on both, two valid `http.server.request` events
-    are emitted per request and neither layer raises. No `Proves:` line
-    yet: waits for STANDARDS.md's own HTM-010 entry (phase 5)."""
+    are emitted per request and neither layer raises."""
 
     middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
     service_name = "django-coexistence"
@@ -489,13 +550,13 @@ class DjangoMiddlewareCoexistenceTests(_DjangoMiddlewareTestCase):
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoMiddlewareStreamingTests(_DjangoMiddlewareTestCase):
-    """The bound context stays correctly bound throughout a synchronous
+    """Proves: HTM-013
+
+    The bound context stays correctly bound throughout a synchronous
     `StreamingHttpResponse` body, over both WSGI and ASGI: every chunk's
     own log line carries the request's `trace_id`, and the completion
     event's `event.duration` covers the whole streamed body, consumed
-    well after the middleware chain itself has already returned. No
-    `Proves:` line yet: waits for STANDARDS.md's own HTM-013 entry
-    (phase 5)."""
+    well after the middleware chain itself has already returned."""
 
     middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
     service_name = "django-streaming"
@@ -543,11 +604,12 @@ class DjangoMiddlewareStreamingTests(_DjangoMiddlewareTestCase):
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoMiddlewareAsyncStreamingTests(_DjangoMiddlewareTestCase):
-    """The async half of HTM-013: an async-iterable streaming body keeps
+    """Proves: HTM-013
+
+    The async half of HTM-013: an async-iterable streaming body keeps
     the same context-preservation guarantee. Skips entirely on Django's
     oldest supported row (3.2.9), which has no `__aiter__` on
-    `StreamingHttpResponse` at all. No `Proves:` line yet: waits for
-    STANDARDS.md's own HTM-013 entry (phase 5)."""
+    `StreamingHttpResponse` at all."""
 
     middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
     service_name = "django-async-streaming"
@@ -573,11 +635,12 @@ class DjangoMiddlewareAsyncStreamingTests(_DjangoMiddlewareTestCase):
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoMiddlewareFileResponseTests(_DjangoMiddlewareTestCase):
-    """`FileResponse.file_to_stream` survives untouched (sendfile intact):
+    """Proves: HTM-013
+
+    `FileResponse.file_to_stream` survives untouched (sendfile intact):
     the rebind carve-out leaves a `FileResponse` alone entirely, and a
     direct assertion confirms rebinding WOULD null it if attempted
-    (design D5). No `Proves:` line yet: waits for STANDARDS.md's own
-    HTM-013 entry (phase 5)."""
+    (design D5)."""
 
     middleware = ("tests._django_matrix_middleware.django_middleware_logging",)
     service_name = "django-file-response"
@@ -630,14 +693,15 @@ class DjangoMiddlewareFileResponseTests(_DjangoMiddlewareTestCase):
 
 @unittest.skipIf(django is None, "django is not installed in this environment")
 class DjangoLogRequestsSettingTests(_DjangoMiddlewareTestCase):
-    """`SEMLOG_LOG_REQUESTS` reaches the class through the constraint that
+    """Proves: HTM-011
+
+    `SEMLOG_LOG_REQUESTS` reaches the class through the constraint that
     a dotted `settings.MIDDLEWARE` entry only ever receives one
     positional argument (design D6): `True` emits exactly one completion
     event per request, sync WSGI and async ASGI; `False` and absent emit
     none; a non-boolean value raises `ValueError` naming the value and
     its source; an explicit `log_requests=` keyword still wins; and `off`
-    mode ignores the setting entirely. No `Proves:` line yet: waits for
-    STANDARDS.md's own HTM-011 entry (phase 5)."""
+    mode ignores the setting entirely."""
 
     service_name = "django-log-requests-setting"
 

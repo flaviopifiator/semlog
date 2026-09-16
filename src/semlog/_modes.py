@@ -1,8 +1,8 @@
 """Execution modes (LM-001, LP-010 scoped): `full` (default, today's
 behavior), `hybrid` (root untouched, `semlog=True` routes to JSON once),
 `off` (as if semlog were not installed, except the keyword never raises).
-State lives in one module-level `types.SimpleNamespace`, not a class
-(CP-017's class budget)."""
+State lives in one module-level `types.SimpleNamespace`, not a class,
+matching CP-016's flat three-stage architecture."""
 
 from __future__ import annotations
 

@@ -17,9 +17,9 @@ each one is checked against that source instead of being trusted:
 - PyPI: the live version badge of the published project, linking to its
   page on PyPI, and never left behind inside an HTML comment.
 
-Not tied to a single STANDARDS.md requirement id (same precedent as
-`tests/test_class_budget.py`): these checks keep published claims
-consistent with the sources that other tests already prove.
+Not tied to a single STANDARDS.md requirement id: these checks keep
+published claims consistent with the sources that other tests already
+prove, so no id cleanly backs them alone.
 """
 
 from __future__ import annotations

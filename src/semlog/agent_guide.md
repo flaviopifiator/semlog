@@ -6,7 +6,7 @@ This guide is the single, self-sufficient source for writing correct call sites 
 
 ## Public API
 
-semlog exposes exactly eight public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods.
+semlog exposes exactly nine public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods.
 
 ### configure
 
@@ -60,6 +60,15 @@ class ASGIMiddleware:
 ```
 
 The same contract as `WSGIMiddleware`, including `baggage_allow`'s configured-default fallback, for a pure ASGI 3.0 application operating at the `http` scope; it does not depend on `BaseHTTPMiddleware`. The `lifespan` scope passes through untouched, with no header parsing and no context binding.
+
+### DjangoMiddleware
+
+```python
+class DjangoMiddleware:
+    def __init__(self, get_response, *, baggage_allow=None, log_requests=None): ...
+```
+
+A `settings.MIDDLEWARE` entry serving both synchronous and asynchronous Django deployments through exactly one class: parses inbound `traceparent`/`tracestate`/baggage headers, binds a fresh context for the request, and stays correctly bound throughout a `StreamingHttpResponse` body, including on Django's oldest supported release. `baggage_allow` follows the same configured-default fallback as `WSGIMiddleware`/`ASGIMiddleware`. `log_requests=True` additionally emits one `http.server.request` completion event per request; left as `None` (the default), it resolves instead from the Django setting `SEMLOG_LOG_REQUESTS` (default off), because a dotted `MIDDLEWARE` entry cannot receive a keyword argument. `process_exception` stashes an unhandled view exception without swallowing it, so the completion event still carries the real final status and a rendered traceback; see the Django recipe below for placement guidance and this hook's permanent limitations.
 
 ### operation
 

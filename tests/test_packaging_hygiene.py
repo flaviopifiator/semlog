@@ -146,7 +146,7 @@ class Changelog020Tests(unittest.TestCase):
 
 
 class SemlogImportsWithoutDjangoTests(unittest.TestCase):
-    """Proves: CP-008
+    """Proves: CP-008, HTM-008
 
     Runs in a child interpreter with `django` and `asgiref` blocked by a
     `sys.meta_path` finder installed before `semlog` is ever imported:
@@ -155,9 +155,8 @@ class SemlogImportsWithoutDjangoTests(unittest.TestCase):
     `asgiref` and `asyncio` must all stay absent from `sys.modules`
     afterward -- proving HTM-008's "MUST NOT import django or asgiref at
     semlog import time" clause end to end, including the lazy
-    coroutine-detection shim inside `DjangoMiddleware.__init__`. The
-    HTM-008 half of this citation waits for STANDARDS.md's own HTM-008
-    entry (phase 5). Lives here, not in `tests/test_django_matrix.py`: it
+    coroutine-detection shim inside `DjangoMiddleware.__init__`.
+    Lives here, not in `tests/test_django_matrix.py`: it
     must run in the **default** suite, where Django is genuinely absent,
     not inside the `django-matrix` CI job where Django is installed."""
 

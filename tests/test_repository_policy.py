@@ -442,7 +442,8 @@ class RunScalarYamlSafetyTests(unittest.TestCase):
     line parser can see: a single-line `run:` value that YAML reads as a
     mapping, a comment, or another node instead of the command. Not tied to
     a single STANDARDS.md requirement id (same precedent as
-    `UvBootstrapHashPinningTests`), so this carries no `Proves:` line."""
+    `UvBootstrapHashPinningTests`: no id cleanly backs this specific check
+    alone), so this carries no `Proves:` line."""
 
     def test_no_single_line_run_value_is_a_yaml_hazard(self):
         paths = sorted(WORKFLOWS_DIR.glob("*.yml"))
@@ -933,11 +934,10 @@ class ReleasingDocumentationTests(_WorkflowTextMixin, unittest.TestCase):
 
 class UvBootstrapHashPinningTests(_WorkflowTextMixin, unittest.TestCase):
     """Pinned, hash-checked `uv` CLI bootstrap for CI (design #223
-    P3-ADR-8). Not tied to a single STANDARDS.md requirement id (same
-    precedent as `tests/test_class_budget.py`): hash-pinning the `uv`
-    bootstrap backs PRV-002/OSF-002's SHA/least-privilege posture but is
-    not itself a separately declared rule, so this carries no `Proves:`
-    line."""
+    P3-ADR-8). Not tied to a single STANDARDS.md requirement id:
+    hash-pinning the `uv` bootstrap backs PRV-002/OSF-002's SHA/
+    least-privilege posture but is not itself a separately declared rule,
+    so this carries no `Proves:` line."""
 
     def test_uv_requirements_file_pins_an_exact_version_with_hashes(self):
         text = read_text(UV_REQUIREMENTS_PATH)

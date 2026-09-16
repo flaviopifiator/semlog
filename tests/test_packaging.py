@@ -7,12 +7,13 @@ Checks what `pyproject.toml` itself declares, without building a wheel
 same batch): the built distribution's `dependencies` list stays empty
 (LP-001, CP-003), the declared build backend is the approved `uv_build`
 (CP-014, already proven separately once its own anti-drift tasks land),
-and the public-surface facts already proven by
-`tests/test_public_surface.py` (CP-015, 8 names) and
-`tests/test_class_budget.py` (CP-017, 6 classes/0 ABCs) still hold at the
-packaging layer -- these two are re-asserted here as supporting,
-non-``Proves``-tagged checks, since their own modules already carry the
-citations that make them count toward traceability.
+and the public-surface fact already proven by
+`tests/test_public_surface.py` (CP-015, 9 names) still holds at the
+packaging layer -- re-asserted here as a supporting, non-``Proves``-tagged
+check, since that module already carries the citation that makes it
+count toward traceability. `tests/test_class_budget.py` (CP-017) no
+longer publishes a class count to re-assert here: only the no-ABC and
+no-class-factory rules remain, already proven in that module alone.
 
 On Python 3.10 there is no stdlib TOML reader (the same constraint
 `_identity.py::_read_pyproject` documents for SI-001/SI-005), so this
@@ -138,12 +139,13 @@ class ClassifiersTests(unittest.TestCase):
 
 
 class PackagingLayerSurfaceFactsTests(unittest.TestCase):
-    """Re-affirms, at the packaging layer, facts already proven under CP-015
-    (`tests/test_public_surface.py`) and CP-017's class budget
-    (`tests/test_class_budget.py`); no new `Proves` tag needed here."""
+    """Re-affirms, at the packaging layer, the public-surface fact already
+    proven under CP-015 (`tests/test_public_surface.py`); no new `Proves`
+    tag needed here. CP-017 no longer publishes a class count to
+    re-affirm."""
 
-    def test_public_surface_is_exactly_eight_names(self):
-        self.assertEqual(8, len(semlog.__all__))
+    def test_public_surface_is_exactly_nine_names(self):
+        self.assertEqual(9, len(semlog.__all__))
 
     def test_requires_python_floor_matches_cp_001(self):
         data = _load_pyproject()

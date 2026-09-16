@@ -1,12 +1,10 @@
-"""Bundled RFC 9562 §5.7 UUIDv7 fallback for Python 3.10-3.13.
-
-Excluded from the CP-017 source-line budget by filename (design #162/#170
-§8; STANDARDS CP-017): `_request_id.py` delegates to stdlib `uuid.uuid7()`
-on 3.14+ instead. A 48-bit millisecond timestamp, a 42-bit monotonic
+"""Bundled RFC 9562 §5.7 UUIDv7 fallback for Python 3.10-3.13 (design
+#162/#170 §8): `_request_id.py` delegates to stdlib `uuid.uuid7()` on
+3.14+ instead. A 48-bit millisecond timestamp, a 42-bit monotonic
 counter (12 bits placed in `rand_a`, plus the high 30 bits of `rand_b`)
-that increments instead of moving backward within the same millisecond or
-across a clock regression, and 32 fresh random bits in the low end of
-`rand_b` on every call.
+that increments instead of moving backward within the same millisecond
+or across a clock regression, and 32 fresh random bits in the low end
+of `rand_b` on every call.
 """
 
 from __future__ import annotations
