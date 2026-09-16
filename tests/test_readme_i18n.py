@@ -182,6 +182,38 @@ class ReadmeParityPerturbationTests(unittest.TestCase):
         self.assertNotEqual(_badge_set(self.english), _badge_set(mutated))
 
 
+_OPENING_H2_KEYS = ("why", "installation", "name", "quick_start")
+_SUMMARY_LINE_RE = re.compile(r"^\*\*\S.*\.\*\*$")
+# The two differentiators, as the ordered technical tokens that carry them:
+# the adoption story first (`hybrid`, the `semlog=True` keyword it needs, and
+# the `SEMLOG_MODE=off` rollback), then the zero-dependency story, whose
+# claim is exactly the `Requires-Dist` count of the built wheel that
+# `tests/test_wheel_contents.py` asserts. Every token is language-neutral,
+# so the same ordered check applies to both editions verbatim.
+_DIFFERENTIATOR_TOKENS = (
+    "`hybrid`",
+    "`semlog=True`",
+    "`SEMLOG_MODE=off`",
+    "`Requires-Dist`",
+)
+_INSTALL_COMMAND = "pip install semlog"
+# Checked as a whole fenced block, not as a substring: `uv pip install
+# semlog` contains `pip install semlog`, so a substring check stays green
+# even when the plain `pip` instruction is gone.
+_INSTALL_BLOCK = ("bash", _INSTALL_COMMAND)
+# The name explanation: the two word parts, and the specification the name
+# refers to. All four stay untranslated in the Spanish edition, being code
+# spans and a proper noun.
+_NAME_TOKENS = ("`semantic`", "`log`", "OpenTelemetry", "Semantic Conventions")
+# The one prose fact of the name section that IS translated, so it is looked
+# up per language (same precedent as `_SEARCH_DIRECTION_PHRASES` below): a
+# mutation applied IDENTICALLY to both editions defeats cross-file parity
+# alone, since the parity checks only compare one edition against the other.
+_NAME_RATIONALE_PHRASES = {
+    "en": "stable name and a stable meaning",
+    "es": "nombre y un significado estables",
+}
+
 _MODE_BULLET_MARKERS = ("- **`full`**:", "- **`hybrid`**:", "- **`off`**:")
 _PRECEDENCE_TOKENS = ("configure(", "SEMLOG_MODE", "[tool.semlog]")
 _LIMITATION_MARKERS = (
@@ -201,6 +233,78 @@ _SEARCH_DIRECTION_PHRASES = {
 _PRECEDENCE_DEFAULT_RE = re.compile(r'4\.[^\n]*`"full"`')
 _ADOPTION_ORDER_RE = re.compile(r"`hybrid`.{0,30}?`full`", re.DOTALL)
 _ENV_VAR_ROW = "| `SEMLOG_MODE` |"
+
+
+def opening_problems(text, language):
+    """Every way a README's first screen fails to answer, in this order,
+    what semlog is, what makes it different, and how to install it (empty
+    when it answers all three).
+
+    The order is the check: a reader who has to scroll past a
+    configuration table to learn what the project does has already left.
+    So the H1 is followed immediately by a one-line summary, the first
+    four level-two sections are the "why", the install instructions, the
+    name explanation and the quick start, and the "why" section states the
+    two differentiators in a fixed order. Scoped to the relevant section
+    span via `section()`, never a whole-document `in` check, so an
+    unrelated mention of the same token elsewhere in a 20+ KB document
+    cannot satisfy it.
+    """
+    labels = READMES[language]
+    problems = []
+
+    lines = [line for line in text.splitlines() if line.strip()]
+    if "# semlog" not in lines:
+        return ["no `# semlog` H1"]
+    title_index = lines.index("# semlog")
+    summary = lines[title_index + 1] if title_index + 1 < len(lines) else ""
+    if not _SUMMARY_LINE_RE.match(summary):
+        problems.append(f"no one-line summary under the H1: {summary!r}")
+
+    titles = [title for level, title in headings(text) if level == 2]
+    expected = [labels[key] for key in _OPENING_H2_KEYS]
+    if titles[: len(expected)] != expected:
+        problems.append(f"opening sections are {titles[: len(expected)]!r}")
+
+    try:
+        why_text = section(text, 2, labels["why"])
+    except ValueError:
+        problems.append("no Why section")
+        why_text = ""
+    positions = [why_text.find(token) for token in _DIFFERENTIATOR_TOKENS]
+    for token, position in zip(_DIFFERENTIATOR_TOKENS, positions):
+        if position == -1:
+            problems.append(f"missing differentiator token {token!r}")
+    if all(position != -1 for position in positions) and positions != sorted(positions):
+        problems.append("differentiators are out of order")
+
+    try:
+        install_text = section(text, 2, labels["installation"])
+    except ValueError:
+        problems.append("no Installation section")
+        install_text = ""
+    if _INSTALL_BLOCK not in fenced_blocks(install_text):
+        problems.append(f"no `bash` block holding exactly {_INSTALL_COMMAND!r}")
+
+    return problems
+
+
+def name_section_problems(text, language):
+    """Every way a README's name section fails to explain where the name
+    comes from and why that matters (empty when it explains both)."""
+    labels = READMES[language]
+    try:
+        name_text = section(text, 2, labels["name"])
+    except ValueError:
+        return ["no name section"]
+    problems = [
+        f"missing name-explanation token {token!r}"
+        for token in _NAME_TOKENS
+        if token not in name_text
+    ]
+    if _NAME_RATIONALE_PHRASES[language] not in name_text:
+        problems.append("missing stable-meaning rationale")
+    return problems
 
 
 def modes_narrative_problems(text, language):
@@ -290,6 +394,135 @@ def env_var_table_problems(text, language):
     if _ENV_VAR_ROW not in precedence_text:
         return ["missing SEMLOG_MODE row in the environment-variable table"]
     return []
+
+
+class ReadmeOpeningParityTests(unittest.TestCase):
+    """The first screen of both editions: a one-line summary under the H1,
+    the two differentiators in order, and the install command, followed by
+    the section that explains where the name comes from. Not tied to a
+    single STANDARDS.md requirement id (same precedent as
+    `tests/test_class_budget.py`), so no `Proves:` line: DOC-002's parity
+    is proven above, and no requirement governs the order in which a
+    README introduces the project."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.texts = {language: readme_text(language) for language in READMES}
+
+    def test_both_editions_open_with_summary_differentiators_and_install(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertEqual([], opening_problems(text, language))
+
+    def test_both_editions_explain_the_name(self):
+        for language, text in self.texts.items():
+            with self.subTest(language=language):
+                self.assertEqual([], name_section_problems(text, language))
+
+
+class ReadmeOpeningPerturbationTests(unittest.TestCase):
+    """Every check `opening_problems` and `name_section_problems` performs
+    is demonstrated here to be capable of failing, against deliberately
+    broken in-memory copies of the real README text. The real files are
+    never written to."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.english = readme_text("en")
+        cls.spanish = readme_text("es")
+
+    def test_baseline_has_no_problems(self):
+        self.assertEqual([], opening_problems(self.english, "en"))
+        self.assertEqual([], name_section_problems(self.english, "en"))
+
+    def test_a_missing_one_line_summary_is_caught(self):
+        summary = next(
+            line
+            for line in self.english.splitlines()
+            if _SUMMARY_LINE_RE.match(line.strip())
+        )
+        mutated = self.english.replace(summary + "\n", "", 1)
+        self.assertNotEqual(mutated, self.english)
+        problems = opening_problems(mutated, "en")
+        self.assertTrue(any("one-line summary" in p for p in problems), problems)
+
+    def test_installation_before_the_why_section_is_caught(self):
+        # The exact regression this check exists for: install instructions
+        # are useless to a reader who does not yet know what the project is.
+        mutated = self.english.replace("## Installation", "## Aardvark", 1).replace(
+            "## Why semlog", "## Installation", 1
+        )
+        self.assertNotEqual(mutated, self.english)
+        problems = opening_problems(mutated, "en")
+        self.assertTrue(any("opening sections are" in p for p in problems), problems)
+
+    def test_a_deleted_differentiator_token_is_caught(self):
+        mutated = self.english.replace("`SEMLOG_MODE=off`", "the mode setting", 1)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing differentiator token '`SEMLOG_MODE=off`'",
+            opening_problems(mutated, "en"),
+        )
+
+    def test_differentiators_in_the_wrong_order_are_caught(self):
+        why_text = section(self.english, 2, "Why semlog")
+        adoption = next(
+            line for line in why_text.splitlines() if "`SEMLOG_MODE=off`" in line
+        )
+        zero_dependency = next(
+            line for line in why_text.splitlines() if "`Requires-Dist`" in line
+        )
+        swapped = why_text.replace(adoption, "\0", 1).replace(
+            zero_dependency, adoption, 1
+        )
+        swapped = swapped.replace("\0", zero_dependency, 1)
+        mutated = self.english.replace(why_text, swapped, 1)
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "differentiators are out of order", opening_problems(mutated, "en")
+        )
+
+    def test_a_missing_install_command_is_caught(self):
+        # `uv pip install semlog` survives this mutation on purpose: it is
+        # what makes a plain substring check vacuous here.
+        mutated = self.english.replace(
+            f"```bash\n{_INSTALL_COMMAND}\n```", "```bash\npip install .\n```", 1
+        )
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(_INSTALL_COMMAND, mutated)
+        self.assertIn(
+            f"no `bash` block holding exactly {_INSTALL_COMMAND!r}",
+            opening_problems(mutated, "en"),
+        )
+
+    def test_deleting_the_name_section_entirely_is_caught(self):
+        start = self.english.index("## What the name means")
+        end = self.english.index("## Quick start")
+        mutated = self.english[:start] + self.english[end:]
+        self.assertNotEqual(mutated, self.english)
+        self.assertEqual(["no name section"], name_section_problems(mutated, "en"))
+
+    def test_a_name_section_that_drops_the_specification_is_caught(self):
+        mutated = self.english.replace("Semantic Conventions", "conventions")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing name-explanation token 'Semantic Conventions'",
+            name_section_problems(mutated, "en"),
+        )
+
+    def test_name_rationale_mutated_identically_in_both_editions_is_caught(self):
+        mutated_en = self.english.replace(_NAME_RATIONALE_PHRASES["en"], "nice name", 1)
+        mutated_es = self.spanish.replace(
+            _NAME_RATIONALE_PHRASES["es"], "un nombre lindo", 1
+        )
+        self.assertNotEqual(mutated_en, self.english)
+        self.assertNotEqual(mutated_es, self.spanish)
+        self.assertIn(
+            "missing stable-meaning rationale", name_section_problems(mutated_en, "en")
+        )
+        self.assertIn(
+            "missing stable-meaning rationale", name_section_problems(mutated_es, "es")
+        )
 
 
 class ReadmeModesParityTests(unittest.TestCase):
