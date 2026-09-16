@@ -557,11 +557,11 @@ The specification's requirement identifiers, with the section of this document t
 | LP-003 | 10 | External: [QUEUEHANDLER] | 2.33, 2.35 |
 | LP-004 | 7 | External: [OTEL-SEMCONV], [OWASP-ASVS] | 2.25, 2.26 |
 | LP-005 | 9 | External: [OWASP-LOGGING], [OWASP-ASVS] | 2.23, 2.24 |
-| LP-006 | 10 | External: [QUEUEHANDLER] | 2.33, 2.34 |
+| LP-006 | 10 | External: [QUEUEHANDLER] | `tests/test_transport.py::WriterStreamResolutionTests` |
 | LP-007 | 10 | External: [QUEUEHANDLER], [QUEUELIB] | 2.31, 2.32 |
 | LP-008 | 10 | External: [QUEUELIB], [QUEUEHANDLER], [OS-FORK] | 2.35, 2.37 |
 | LP-009 | 10 | External: [QUEUEHANDLER], [QUEUELIB], [12FACTOR] | 2.31, 2.37 |
-| LP-010 | 10 | External: [LOGGINGHOWTO] | 2.41, 2.42 |
+| LP-010 | 10 | External: [LOGGINGHOWTO] | `tests/test_modes.py::RootLevelScopeTests`, `tests/test_configure.py::ExplicitRootLevelTests` |
 | LP-011 | 10 | Design decision | `tests/test_transport.py::FlushDeadWriterTests` |
 | LP-012 | 10 | Design decision | `tests/test_transport.py::ShutdownNonRootTests` |
 | LM-001 | 10.1 | Design decision | `tests/test_modes.py::ModeResolutionTests` |
@@ -585,14 +585,14 @@ The specification's requirement identifiers, with the section of this document t
 | TCP-009 | 8, 8.3 | External: [RFC6648] | 3.11, 3.12 |
 | TCP-010 | 8 | External: [RFC9562] | 2.11, 2.12 |
 | TCP-011 | 8, 8.3 | External: [TRACECONTEXT] | 3.11, 3.12 |
-| TCP-012 | 8.3 | Design decision | 3.9, 3.10 |
+| TCP-012 | 8.3 | Design decision | `tests/test_bind.py`, `tests/test_off_mode.py::OffDiagnosticsTests` |
 | HTM-001 | 8.2 | External: [PEP3333], [TRACECONTEXT] | 3.1, 3.2 |
 | HTM-002 | 8.2 | External: [ASGI] | 3.3, 3.4 |
 | HTM-003 | 8.2 | External: [PEP3333], [ASGI] | 3.1, 3.3 |
 | HTM-004 | 8.2 | External: [PEP3333], [ASGI] | 3.1, 3.3 |
 | HTM-005 | 8.2 | External: [ASGI] | 3.3, 3.4 |
 | HTM-006 | 8.2 | External: [PEP567] | 3.5, 3.6 |
-| HTM-007 | 8.2 | External: [ECS-EVENT] | 3.13, 3.14 |
+| HTM-007 | 8.2 | External: [ECS-EVENT] | `tests/test_log_requests.py`, `tests/test_hybrid.py::HybridRequestEventTests`, `tests/test_off_mode.py::OffRequestEventTests` |
 | DOC-001 | preamble | Design decision | 1.9 |
 | DOC-002 | 1, whole document | Design decision | 1.8 |
 | DOC-003 | 1.1, Annex A | Design decision | 1.8 |

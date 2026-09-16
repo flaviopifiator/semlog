@@ -58,7 +58,7 @@ logger.info("order.created", extra={"app.order.id": "ord_42", "app.order.total":
 Run `python app.py`. It prints one JSON line:
 
 ```json
-{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.1.0","telemetry.sdk.language":"python"}
+{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.2.0","telemetry.sdk.language":"python"}
 ```
 
 Three rules keep records useful:
@@ -274,7 +274,7 @@ Every record is one JSON object per line, in UTF-8. This record was logged insid
   "service.instance.id": "936c21f2-7be1-4006-933a-e84d39621fe7",
   "deployment.environment.name": "production",
   "telemetry.sdk.name": "semlog",
-  "telemetry.sdk.version": "0.1.0",
+  "telemetry.sdk.version": "0.2.0",
   "telemetry.sdk.language": "python"
 }
 ```

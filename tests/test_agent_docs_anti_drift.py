@@ -451,6 +451,9 @@ _GUIDE_LIMITATION_MARKERS = (
     "MemoryHandler",
     "super()",
 )
+_GUIDE_TOML_EXAMPLE = '[tool.semlog]\nmode = "hybrid"'
+_GUIDE_TOML_EXAMPLE_MUTATED = '[tool.semlog_typo]\nmode = "hybrid"'
+_GUIDE_TOMLLIB_CAVEAT_VERSION = "3.11"
 
 
 def _guide_modes_section_text(text):
@@ -469,7 +472,10 @@ def guide_modes_narrative_problems(text=None):
     `StreamHandler` mention in its `configure()` stub's `queue=False`
     description (validate-wu69 #338, MAJOR M1's own repro), so a
     whole-file check for that single word alone passes even with this
-    entire subsection deleted."""
+    entire subsection deleted. The TOML example and the tomllib version
+    caveat are also checked here (validate-wu69 #339, MINOR n3): a
+    single-file document has no cross-file parity check at all, so an
+    edit to either one here previously went completely undetected."""
     if text is None:
         text = _guide_text()
     section_text = _guide_modes_section_text(text)
@@ -490,6 +496,12 @@ def guide_modes_narrative_problems(text=None):
 
     if "ValueError" not in section_text:
         problems.append("missing ValueError")
+
+    if _GUIDE_TOML_EXAMPLE not in section_text:
+        problems.append("TOML example missing or altered")
+
+    if _GUIDE_TOMLLIB_CAVEAT_VERSION not in section_text:
+        problems.append("missing tomllib version caveat")
 
     for marker in _GUIDE_LIMITATION_MARKERS:
         if marker not in section_text:
@@ -612,6 +624,27 @@ class AgentGuideModesPerturbationTests(unittest.TestCase):
         self.assertIn(
             f"missing limitation marker {'super()'!r}",
             guide_modes_narrative_problems(mutated),
+        )
+
+    def test_toml_example_mutation_is_caught(self):
+        # validate-wu69 #339, MINOR n3: the guide is a single file with no
+        # cross-edition parity check, so an edit here was previously
+        # undetected regardless of whether the READMEs stayed correct.
+        mutated = self.text.replace(_GUIDE_TOML_EXAMPLE, _GUIDE_TOML_EXAMPLE_MUTATED, 1)
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "TOML example missing or altered", guide_modes_narrative_problems(mutated)
+        )
+
+    def test_tomllib_caveat_version_mutation_is_caught(self):
+        mutated = self.text.replace(
+            "available on Python 3.11 and later",
+            "available on Python 3.10 and later",
+            1,
+        )
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing tomllib version caveat", guide_modes_narrative_problems(mutated)
         )
 
 

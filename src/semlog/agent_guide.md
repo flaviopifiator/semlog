@@ -187,7 +187,7 @@ The full normative field order, presence rules, and the published JSON Schema li
 
 ## Configuration and precedence
 
-All `configure()` parameters are keyword-only; there is no settings object or dict. Precedence, highest to lowest, is always: explicit `configure()` parameter > `OTEL_*` environment variable > `pyproject.toml` (`[project]`, then `[tool.poetry]` as a fallback) > built-in default. A forced value (parameter or environment variable) always wins over a detected one.
+All `configure()` parameters are keyword-only; there is no settings object or dict. For the identity and limit parameters below, precedence, highest to lowest, is always: explicit `configure()` parameter > `OTEL_*` environment variable > `pyproject.toml` (`[project]`, then `[tool.poetry]` as a fallback) > built-in default. A forced value (parameter or environment variable) always wins over a detected one. `mode` follows its own precedence chain instead, described in "Execution modes and the semlog=True keyword" below.
 
 | Group | Parameter | Default | Notes |
 |---|---|---|---|

@@ -58,7 +58,7 @@ logger.info("order.created", extra={"app.order.id": "ord_42", "app.order.total":
 Ejecute `python app.py`. Imprime una línea JSON:
 
 ```json
-{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.1.0","telemetry.sdk.language":"python"}
+{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.2.0","telemetry.sdk.language":"python"}
 ```
 
 Tres reglas mantienen útiles los registros:
@@ -224,9 +224,9 @@ Cada registro se renderiza en el hilo que hace la llamada y se encola para un ú
 
 Para un servicio que ya está en producción, con sus propias líneas de registro existentes, `hybrid` es la vía de adopción: cada línea que el servicio ya imprime sigue imprimiéndose de forma idéntica byte a byte, y una llamada escrita con la palabra clave `semlog=True` queda oculta de esa misma salida impresa y se convierte, en su lugar, en un registro JSON. `logger.info("event.name", extra={...}, semlog=True)` es la forma de una llamada que adopta semlog de esta manera. `off` se comporta como si semlog nunca se hubiera instalado, salvo que la propia palabra clave nunca lanza una excepción, de modo que resulta seguro dejarla en los puntos de llamada durante una reversión. `full` es el estado final, y el valor por defecto para un servicio nuevo que no tiene líneas de registro existentes que preservar: la vía de adopción es `hybrid`, y luego `full` una vez revisada su salida. `mode` se cambia por entorno, sin necesidad de modificar código.
 
-- **`full`**: cada llamada de registro pasa por el pipeline de semlog y se convierte en un registro JSON por línea, exactamente como se muestra en [Salida](#salida).
+- **`full`**: cada llamada de registro pasa por la tubería de semlog y se convierte en un registro JSON por línea, exactamente como se muestra en [Salida](#salida).
 - **`hybrid`**: `configure()` nunca toca los manejadores ni el nivel existentes del logger raíz. Una llamada hecha con `semlog=True` queda oculta de todo `StreamHandler` y se emite, en su lugar, como un registro JSON de semlog; cualquier otra llamada sigue imprimiéndose exactamente igual que antes de instalar semlog. Ver [Limitaciones](#limitaciones) para el alcance exacto de esta supresión.
-- **`off`**: `configure()` no instala nada y no toca el logger raíz. `semlog=True` sigue sin lanzar nunca una excepción, pero no produce salida JSON ni ningún otro efecto propio; `operation()`, `bind()` y ambos middlewares siguen funcionando como pasos inertes.
+- **`off`**: `configure()` no instala nada y no toca el logger raíz. `semlog=True` sigue sin lanzar nunca una excepción, pero no produce salida JSON ni ningún otro efecto propio; `operation()`, `bind()` y ambos middlewares siguen funcionando como mecanismos de paso inertes.
 
 ### Fuentes de configuración
 
@@ -247,8 +247,8 @@ Leer `pyproject.toml` necesita `tomllib` de la biblioteca estándar, disponible 
 ### Limitaciones
 
 - **La supresión de hybrid está limitada a `StreamHandler.handle`.** Solo las instancias de `logging.StreamHandler` y sus subclases que llegan a ese método quedan ocultas de un registro marcado. Un manejador fuera de ese despacho síncrono, como un `logging.handlers.QueueHandler` emparejado con un `QueueListener`, o un `logging.handlers.MemoryHandler`, puede seguir renderizando un registro marcado como texto; lo mismo puede ocurrir con una subclase de `StreamHandler` que sobrescribe `handle()` sin llamar a `super().handle()`. Nada de esto es un defecto, solo el límite documentado de lo que alcanza un parche a nivel de método.
-- **`off` es un interruptor de inicio de proceso, no un cambio en caliente.** Un proceso que arranca en modo `off` (o con `SEMLOG_MODE=off`) se comporta como si semlog nunca se hubiera instalado. Reconfigurar un proceso ya en ejecución de `full` o `hybrid` a `off` deja instalado, sin desmontar, el pipeline JSON que ya estaba adjunto al logger raíz.
-- **Desinstalar semlog mientras quedan llamadas marcadas lanza `TypeError`.** Si `semlog` se retira de un servicio que aún tiene puntos de llamada con `semlog=True`, una llamada habilitada en ese punto de llamada falla con `TypeError`, en lugar de fallar en silencio. Quitar la palabra clave de los puntos de llamada antes de desinstalar.
+- **`off` es un interruptor de inicio de proceso, no un cambio en caliente.** Un proceso que arranca en modo `off` (o con `SEMLOG_MODE=off`) se comporta como si semlog nunca se hubiera instalado. Reconfigurar un proceso ya en ejecución de `full` o `hybrid` a `off` deja instalada, sin desmontar, la tubería JSON que ya estaba adjunta al logger raíz.
+- **Desinstalar semlog mientras quedan llamadas marcadas lanza `TypeError`.** Si `semlog` se retira de un servicio que aún tiene puntos de llamada con `semlog=True`, una llamada habilitada en ese punto de llamada falla con `TypeError`, en lugar de fallar en silencio. Quite la palabra clave de los puntos de llamada antes de desinstalar.
 
 ## Salida
 
@@ -274,7 +274,7 @@ Cada registro es un objeto JSON por línea, en UTF-8. Este registro se emitió d
   "service.instance.id": "936c21f2-7be1-4006-933a-e84d39621fe7",
   "deployment.environment.name": "production",
   "telemetry.sdk.name": "semlog",
-  "telemetry.sdk.version": "0.1.0",
+  "telemetry.sdk.version": "0.2.0",
   "telemetry.sdk.language": "python"
 }
 ```

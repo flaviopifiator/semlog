@@ -15,9 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the default and the end state for a new service), `hybrid` (the
   adoption path for a service already running in production: every
   existing log line keeps printing byte-identically, while a call written
-  as `logger.info("event.name", extra={...}, semlog=True)` additionally
-  becomes one JSON record), and `off` (behaves as if semlog were never
-  installed, except that the keyword itself never raises). `mode`
+  as `logger.info("event.name", extra={...}, semlog=True)` is hidden from
+  that same printed output and instead becomes one JSON record), and
+  `off` (behaves as if semlog were never installed, except that the
+  keyword itself never raises). `mode`
   resolves from the `mode` parameter, then the `SEMLOG_MODE` environment
   variable, then `[tool.semlog].mode` in `pyproject.toml` (Python 3.11 and
   later only), then the `"full"` default; an invalid value from any
