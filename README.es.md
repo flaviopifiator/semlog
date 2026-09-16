@@ -115,9 +115,9 @@ Las firmas completas y su semántica están en la [guía para agentes](src/semlo
 
 ## Recetas para frameworks
 
-Cada framework tiene más de una forma soportada de integrarse, y las rutas no son equivalentes. Todos los ejemplos que siguen son completos y funcionan tal como están.
+Cada framework tiene más de una forma soportada de integrarse, y las rutas no son equivalentes. Todos los ejemplos que siguen funcionan tal como están escritos; un marcador `# settings.py` o `# apps.py` indica el archivo al que pertenece cada bloque.
 
-En todos ellos, `log_requests=True` agrega un evento de finalización `http.server.request` por solicitud: INFO cuando termina bien, ERROR cuando la aplicación lanza una excepción no manejada, con `http.request.method`, `url.path`, `http.response.status_code` y `event.duration` en nanosegundos. Nunca lleva `url.query`. El valor por defecto es `False`, que no agrega ningún evento. En modo `hybrid` ese evento necesita una línea más en la aplicación; ver [Modos](#modos).
+Todas las rutas pueden agregar el mismo evento de finalización: un registro `http.server.request` por solicitud, INFO cuando termina bien, ERROR cuando la aplicación lanza una excepción no manejada, con `http.request.method`, `url.path`, `http.response.status_code` y `event.duration` en nanosegundos, y nunca `url.query`. Un envoltorio lo habilita con `log_requests=True`; la clase de middleware de Django, con el ajuste `SEMLOG_LOG_REQUESTS`. Los dos vienen desactivados. En modo `hybrid` el evento necesita una línea más en la aplicación; ver [Modos](#modos).
 
 ### FastAPI
 

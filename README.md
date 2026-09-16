@@ -115,9 +115,9 @@ Full signatures and semantics are in the [agent guide](src/semlog/agent_guide.md
 
 ## Framework recipes
 
-Each framework has more than one supported way in, and the routes are not equivalent. Every example below is complete and runs as it stands.
+Each framework has more than one supported way in, and the routes are not equivalent. Every example below runs as written; a `# settings.py` or `# apps.py` marker names the file the block belongs in.
 
-In all of them, `log_requests=True` adds one `http.server.request` completion event per request: INFO on success, ERROR when the application raises an unhandled exception, carrying `http.request.method`, `url.path`, `http.response.status_code` and `event.duration` in nanoseconds. It never carries `url.query`. The default is `False`, which adds no event. In `hybrid` mode that event needs one more line in the application; see [Modes](#modes).
+Every route can add the same completion event: one `http.server.request` record per request, INFO on success, ERROR when the application raises an unhandled exception, carrying `http.request.method`, `url.path`, `http.response.status_code` and `event.duration` in nanoseconds, and never `url.query`. A wrapper enables it with `log_requests=True`, the Django middleware class with the `SEMLOG_LOG_REQUESTS` setting; both default to off. In `hybrid` mode the event needs one more line in the application; see [Modes](#modes).
 
 ### FastAPI
 
