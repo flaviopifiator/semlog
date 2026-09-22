@@ -151,8 +151,10 @@ class Changelog030Tests(unittest.TestCase):
     CHANGELOG.md's `## [0.3.0]` section: a dated heading, a non-empty
     `### Added` subsection naming `DjangoMiddleware` and the FastAPI
     `add_middleware` recipe, and a non-empty `### Changed` subsection for
-    the CP-015/CP-017 amendments; `pyproject.toml` reads the current
-    `0.4.0` release version."""
+    the CP-015/CP-017 amendments. `pyproject.toml`'s own version is
+    asserted by `Changelog050Tests` instead, now that 0.5.0 is current
+    (mirroring `Changelog020Tests`, which never carried that assertion
+    once 0.3.0 became current)."""
 
     @classmethod
     def setUpClass(cls):
@@ -174,10 +176,6 @@ class Changelog030Tests(unittest.TestCase):
         self.assertIsNotNone(changed, "no ### Changed subsection")
         self.assertTrue(changed)
 
-    def test_pyproject_reads_0_4_0(self):
-        version, _license = _load_pyproject_project_table()
-        self.assertEqual("0.4.0", version)
-
     def test_0_3_0_heading_precedes_the_0_2_0_heading(self):
         # MINOR-C (round 2): DOC-013's own "The prior ## [0.2.0] section
         # MUST remain, unchanged, BELOW it" clause was unenforced --
@@ -186,6 +184,84 @@ class Changelog030Tests(unittest.TestCase):
             self.text.index("## [0.3.0]"),
             self.text.index("## [0.2.0]"),
             "## [0.3.0] must appear before ## [0.2.0], newest-first",
+        )
+
+
+class Changelog040Tests(unittest.TestCase):
+    """Proves: DOC-013
+
+    CHANGELOG.md's `## [0.4.0]` section: a dated heading, a non-empty
+    `### Added` subsection naming `AiohttpMiddleware`, and a non-empty
+    `### Changed` subsection for the CP-015 public-surface growth,
+    appearing between the newer `## [0.5.0]` section and the unchanged
+    `## [0.3.0]` one. `pyproject.toml`'s own version is asserted by
+    `Changelog050Tests` instead, now that 0.5.0 is current."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        cls.section = _changelog_section(cls.text, "## [0.4.0]")
+
+    def test_changelog_has_a_dated_0_4_0_heading(self):
+        self.assertRegex(self.text, r"(?m)^## \[0\.4\.0\] - \d{4}-\d{2}-\d{2}$")
+
+    def test_0_4_0_has_a_non_empty_added_subsection_naming_aiohttp(self):
+        added = _subsection(self.section, "### Added")
+        self.assertIsNotNone(added, "no ### Added subsection")
+        self.assertTrue(added)
+        self.assertIn("AiohttpMiddleware", added)
+        self.assertIn("aiohttp-matrix", added)
+
+    def test_0_4_0_has_a_non_empty_changed_subsection(self):
+        changed = _subsection(self.section, "### Changed")
+        self.assertIsNotNone(changed, "no ### Changed subsection")
+        self.assertTrue(changed)
+
+    def test_0_4_0_heading_precedes_the_0_3_0_heading(self):
+        self.assertLess(
+            self.text.index("## [0.4.0]"),
+            self.text.index("## [0.3.0]"),
+            "## [0.4.0] must appear before ## [0.3.0], newest-first",
+        )
+
+
+class Changelog050Tests(unittest.TestCase):
+    """Proves: DOC-013
+
+    CHANGELOG.md's `## [0.5.0]` section: a dated heading, a non-empty
+    `### Added` subsection naming `semlog.celery(app)`, and a non-empty
+    `### Changed` subsection for the CP-015 public-surface growth,
+    appearing before the unchanged `## [0.4.0]` section;
+    `pyproject.toml` reads `0.5.0`."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        cls.section = _changelog_section(cls.text, "## [0.5.0]")
+
+    def test_changelog_has_a_dated_0_5_0_heading(self):
+        self.assertRegex(self.text, r"(?m)^## \[0\.5\.0\] - \d{4}-\d{2}-\d{2}$")
+
+    def test_0_5_0_has_a_non_empty_added_subsection_naming_semlog_celery(self):
+        added = _subsection(self.section, "### Added")
+        self.assertIsNotNone(added, "no ### Added subsection")
+        self.assertTrue(added)
+        self.assertIn("semlog.celery(app)", added)
+
+    def test_0_5_0_has_a_non_empty_changed_subsection(self):
+        changed = _subsection(self.section, "### Changed")
+        self.assertIsNotNone(changed, "no ### Changed subsection")
+        self.assertTrue(changed)
+
+    def test_pyproject_reads_0_5_0(self):
+        version, _license = _load_pyproject_project_table()
+        self.assertEqual("0.5.0", version)
+
+    def test_0_5_0_heading_precedes_the_0_4_0_heading(self):
+        self.assertLess(
+            self.text.index("## [0.5.0]"),
+            self.text.index("## [0.4.0]"),
+            "## [0.5.0] must appear before ## [0.4.0], newest-first",
         )
 
 
@@ -229,6 +305,56 @@ assert middleware is not None
 
 for blocked_name in ("django", "asgiref", "asyncio"):
     assert blocked_name not in sys.modules, f"{{blocked_name}} was imported"
+
+print("OK")
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("OK", result.stdout)
+
+
+class SemlogImportsWithoutCeleryTests(unittest.TestCase):
+    """Proves: CEL-001, CP-008
+
+    Runs in a child interpreter with `celery` blocked by a `sys.meta_path`
+    finder installed before `semlog` is ever imported: `import semlog`
+    must still succeed, `semlog.celery` must resolve as a callable with no
+    Celery installed at all, and `celery` must stay absent from
+    `sys.modules` afterward -- proving CEL-001's "import semlog MUST
+    succeed with Celery absent" clause end to end, including the lazy
+    `from celery import signals` import inside `celery()` itself. Mirrors
+    `SemlogImportsWithoutDjangoTests`'s own pattern above. Unlike
+    `DjangoMiddleware`, `semlog.celery(app)` is never CALLED here: wiring
+    real Celery signals genuinely requires Celery installed, so only its
+    presence as a callable, import-time-free name is proven without it."""
+
+    def test_semlog_imports_and_exposes_celery_without_celery_installed(self):
+        src_dir = str(REPO_ROOT / "src")
+        script = f"""
+import sys
+
+
+class _BlockFinder:
+    def find_spec(self, name, path, target=None):
+        blocked = name == "celery" or name.startswith("celery.")
+        if blocked:
+            raise ImportError(f"blocked for this test: {{name}}")
+        return None
+
+
+sys.meta_path.insert(0, _BlockFinder())
+sys.path.insert(0, {src_dir!r})
+
+import semlog
+
+assert callable(semlog.celery)
+assert "celery" not in sys.modules, "celery was imported"
 
 print("OK")
 """

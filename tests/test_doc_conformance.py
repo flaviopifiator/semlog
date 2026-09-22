@@ -203,7 +203,7 @@ class Doc007ComplianceReferencesTests(unittest.TestCase):
 # Every element DOC-008 requires AGENTS.md's tooling policy to declare.
 AGENTS_TOOLING_POLICY_ELEMENTS = (
     "standard library",
-    "FastAPI, Starlette, Django, aiohttp, loguru, structlog",
+    "FastAPI, Starlette, Django, aiohttp, Celery, loguru, structlog",
     "`ruff`",
     "GitHub Actions",
     "`uv_build`",
@@ -246,7 +246,7 @@ class Doc008ToolingPolicyTests(unittest.TestCase):
         span = _span(_standards_text(), "DOC-008")
         required_substrings = (
             "standard library",
-            "FastAPI, Starlette, Django, aiohttp, loguru, structlog",
+            "FastAPI, Starlette, Django, aiohttp, Celery, loguru, structlog",
             "ruff",
             "GitHub Actions",
             "uv_build",

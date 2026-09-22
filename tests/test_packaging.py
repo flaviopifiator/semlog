@@ -8,7 +8,7 @@ same batch): the built distribution's `dependencies` list stays empty
 (LP-001, CP-003), the declared build backend is the approved `uv_build`
 (CP-014, already proven separately once its own anti-drift tasks land),
 and the public-surface fact already proven by
-`tests/test_public_surface.py` (CP-015, 9 names) still holds at the
+`tests/test_public_surface.py` (CP-015, 11 names) still holds at the
 packaging layer -- re-asserted here as a supporting, non-``Proves``-tagged
 check, since that module already carries the citation that makes it
 count toward traceability. `tests/test_class_budget.py` (CP-017) no
@@ -248,8 +248,8 @@ class PackagingLayerSurfaceFactsTests(unittest.TestCase):
     tag needed here. CP-017 no longer publishes a class count to
     re-affirm."""
 
-    def test_public_surface_is_exactly_ten_names(self):
-        self.assertEqual(10, len(semlog.__all__))
+    def test_public_surface_is_exactly_eleven_names(self):
+        self.assertEqual(11, len(semlog.__all__))
 
     def test_requires_python_floor_matches_cp_001(self):
         data = _load_pyproject()

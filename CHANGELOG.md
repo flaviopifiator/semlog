@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-22
+
+### Added
+
+- `semlog.celery(app)`, the eleventh public name: wires per-task span
+  continuation, publish-side inject, worker/beat/task-logging ownership,
+  and prefork shutdown flush onto a Celery `Celery` app. Called once, in
+  the same module that creates `app`; idempotent across repeated calls,
+  safe to call before or without `configure()`, and `import semlog` never
+  requires Celery installed.
+- Full-mode worker/beat/`celery.task`-logger records routed as semlog
+  JSON, exactly once each, governed by Celery's own `--loglevel`, with no
+  Celery text output duplicating them (worker/beat/CLI direct writes such
+  as the banner or shutdown notices stay out of scope).
+- Hybrid-mode byte-identity guarantee: Celery's own text output at
+  `--loglevel=INFO` and above is unaffected by `celery(app)`, with a
+  documented `DEBUG`-level limitation where Celery's own `TaskPool: Apply`
+  record can print the injected `traceparent` (and any trusted *baggage*)
+  verbatim, bypassing semlog's own redaction.
+- Per-task span continuation (publisher-to-task and task-to-child-task,
+  concurrent tasks never sharing a `span_id`) and publish-side
+  `traceparent`/*baggage* inject with no active span left unchanged.
+- Prefork shutdown flush: every record enqueued before a forked worker
+  child exits is drained before the process exits; a solo-pool process
+  relies on the existing atexit-based drain.
+- A `celery-matrix` CI job (STANDARDS.md CP-020) covering Celery 5.2.7
+  (Python 3.10, floor row) through 5.6.3 (across the supported Python
+  range), each row paired with a Django version for the Django-layout
+  subprocess fixture, against an in-memory broker with no external broker
+  service.
+- The Celery recipe in README.md, README.es.md and the agent guide:
+  entry-point placement, the `full`/`hybrid` mode guarantees, and the
+  restated Django `AppConfig.ready()` placement for `configure()`.
+
+### Changed
+
+- The public API grows from ten names to eleven with `celery` (CP-015).
+  Celery is a test-only compatibility-matrix subject: it is installed by
+  its CI job, never declared in `pyproject.toml`, so the wheel still
+  declares zero `Requires-Dist` entries and `import semlog` still imports
+  no framework.
+
 ## [0.4.0] - 2026-09-22
 
 ### Added

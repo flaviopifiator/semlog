@@ -17,7 +17,7 @@
 [![Django 3.2.9+](https://img.shields.io/badge/Django-%E2%89%A5%203.2.9-092E20?logo=django&logoColor=white)](.github/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](pyproject.toml)
-[![Requirements proven: 114/114](https://img.shields.io/badge/requirements%20proven-114%2F114-brightgreen)](STANDARDS.md)
+[![Requirements proven: 122/122](https://img.shields.io/badge/requirements%20proven-122%2F122-brightgreen)](STANDARDS.md)
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
 
 ## Qué es semlog
@@ -43,9 +43,9 @@ semlog toma unas pocas posiciones sobre qué es un registro y sobre qué puede e
 
 - **Un registro es un contrato, no texto libre.** Los nombres de los campos, su orden y las reglas de `null` están especificados en [STANDARDS.md](STANDARDS.md) y publicados como JSON Schema ([`schemas/log-record.schema.json`](schemas/log-record.schema.json)). Eliminar o renombrar un campo es un cambio de versión mayor, y adoptar un renombrado posterior de las Semantic Conventions también lo es.
 - **La biblioteca estándar alcanza.** semlog está construido con `logging`, `json`, `contextvars` y `queue`, y la rueda construida no declara ninguna entrada `Requires-Dist`, así que adoptarlo no agrega nada a una revisión de dependencias.
-- **El código de la aplicación no debería tener que aprender una segunda API de registro.** Los puntos de llamada siguen usando `logging.getLogger(__name__)` y los métodos estándar de `Logger`, y la superficie pública son diez nombres. semlog define la forma del registro en lugar de exigir que cada punto de llamada se reescriba contra un objeto logger propio de la biblioteca.
+- **El código de la aplicación no debería tener que aprender una segunda API de registro.** Los puntos de llamada siguen usando `logging.getLogger(__name__)` y los métodos estándar de `Logger`, y la superficie pública son once nombres. semlog define la forma del registro en lugar de exigir que cada punto de llamada se reescriba contra un objeto logger propio de la biblioteca.
 - **La adopción debe ser reversible.** Una biblioteca que solo se puede adoptar reescribiendo cada línea de registro existente no llega a adoptarse en un servicio que ya está en ejecución, así que el modo `hybrid` no reescribe ninguna, y `SEMLOG_MODE=off` retira semlog desde el entorno, sin cambios de código. Ver [Modos](#modos).
-- **Una regla que ninguna prueba cita no es una regla.** Cada requisito normativo de [STANDARDS.md](STANDARDS.md) lleva un identificador y al menos una prueba que lo cita por ese identificador. La suite falla cuando un requisito no tiene ninguna prueba que lo pruebe, y cuando una prueba cita un identificador que no existe. Hoy STANDARDS.md declara 114 requisitos.
+- **Una regla que ninguna prueba cita no es una regla.** Cada requisito normativo de [STANDARDS.md](STANDARDS.md) lleva un identificador y al menos una prueba que lo cita por ese identificador. La suite falla cuando un requisito no tiene ninguna prueba que lo pruebe, y cuando una prueba cita un identificador que no existe. Hoy STANDARDS.md declara 122 requisitos.
 - **Un nombre de campo debería significar lo mismo para una persona, para una herramienta y para un agente.** Los nombres no se inventan aquí: `severity_text`, `severity_number`, `trace_id`, `span_id`, `service.*` y `telemetry.sdk.*` siguen el modelo de datos de logs de OpenTelemetry y sus Semantic Conventions, fijadas en la versión v1.44.0, y la propagación de trazas sigue W3C Trace Context. La guía para agentes viaja dentro del paquete, de modo que un agente de código aplica las mismas reglas sin conexión (`python -m semlog llm`).
 
 ## Instalación
@@ -86,7 +86,7 @@ logger.info("order.created", extra={"app.order.id": "ord_42", "app.order.total":
 Ejecute `python app.py`. Imprime una línea JSON:
 
 ```json
-{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.4.0","telemetry.sdk.language":"python"}
+{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.5.0","telemetry.sdk.language":"python"}
 ```
 
 Tres reglas mantienen útiles los registros:
@@ -97,7 +97,7 @@ Tres reglas mantienen útiles los registros:
 
 ### API pública
 
-semlog expone exactamente diez nombres. Todo lo demás sigue siendo `logging` estándar.
+semlog expone exactamente once nombres. Todo lo demás sigue siendo `logging` estándar.
 
 | Nombre | Sirve para |
 |---|---|
@@ -111,6 +111,7 @@ semlog expone exactamente diez nombres. Todo lo demás sigue siendo `logging` es
 | `inject(headers, *, trusted=True)` | Propagar el contexto de traza a una llamada saliente |
 | `flush(timeout=None)` | Esperar a que se escriban todos los registros encolados, antes de `os._exit()` o en pruebas |
 | `llm()` | Devolver la guía para agentes incluida en la versión instalada (también `python -m semlog llm`) |
+| `celery(app, /)` | Conectar la continuación de span por tarea y la inyección al publicar en una app de Celery |
 
 Las firmas completas y su semántica están en la [guía para agentes](src/semlog/agent_guide.md).
 
@@ -283,6 +284,38 @@ Regístralo primero en `middlewares=[...]`, la posición más externa, para que 
 Un manejador que lanza `web.HTTPNotFound`, o cualquier otra `web.HTTPException`, recibe de aiohttp esa respuesta, así que su evento de finalización es un registro INFO que la lleva, sin traza de la excepción. Cualquier otra excepción es una falla real que aiohttp responde con 500, incluido un `ClientResponseError` lanzado por una llamada saliente que hizo el manejador: ese recibe un registro ERROR con la traza, nunca el estado de la llamada saliente. Solo `asyncio.CancelledError` no produce ningún evento.
 
 `event.duration` cubre la ejecución del manejador, no la transmisión de la respuesta: aiohttp envía la respuesta después de que la cadena de middlewares retornó. Un `StreamResponse` al que el manejador escribe, y una sesión WebSocket que mantiene abierta, quedan dentro de ese intervalo, porque el manejador los espera; un cuerpo asíncrono diferido y el envío de un `FileResponse` ocurren después, y el código que corre allí no ve ningún contexto vigente. Lee el contexto dentro del manejador, o llévalo con `contextvars.copy_context()` al trabajo que entregues a un ejecutor.
+### Celery
+
+`semlog.celery(app)` conecta la continuación de span por tarea, la inyección del lado de publicación, la propiedad del logging de worker/beat/tarea y el vaciado en el apagado del prefork sobre una aplicación de Celery. Llámelo una sola vez, en el mismo módulo que crea `app`.
+
+```python
+# celery.py
+import semlog
+from celery import Celery
+
+app = Celery("myproject")
+app.conf.update(broker_url="redis://localhost:6379/0")
+semlog.celery(app)
+```
+
+En un proyecto Django, `celery(app)` sigue yendo en el módulo de creación de la aplicación de Celery; `configure()` mantiene su lugar habitual en `AppConfig.ready()` (ver la receta de Django más arriba), nunca en `settings.py` ni en el módulo de creación de la aplicación de Celery:
+
+```python
+# apps.py
+import semlog
+from django.apps import AppConfig
+
+
+class MyAppConfig(AppConfig):
+    name = "myapp"
+
+    def ready(self):
+        semlog.configure(service_name="my-django-service")
+```
+
+En modo `full`, los registros de worker, beat y del logger `celery.task` (incluidas las llamadas a `get_task_logger(__name__)` dentro de una tarea) se emiten como JSON de semlog, exactamente una vez cada uno, gobernados por el propio `--loglevel` de Celery. En modo `hybrid`, la salida de texto propia de Celery permanece idéntica byte a byte a una ejecución sin `celery(app)` en `--loglevel=INFO` y niveles superiores; la única excepción documentada es `DEBUG`, donde el propio registro `TaskPool: Apply` de Celery imprime las cabeceras de la tarea saliente tal cual, incluido el `traceparent` (y cualquier *baggage* de confianza) que `celery(app)` inyecta al publicar -- esos valores evitan la propia redacción de semlog en esa línea específica, ya que Celery la renderiza directamente, nunca a través de la tubería de semlog. Cada ejecución de tarea corre dentro de su propio span, continuando el `trace_id` del publicador cuando este inyectó un `traceparent`; publicar una tarea hija desde dentro de una tarea en ejecución propaga el span de esa tarea hacia adelante. Un hijo de worker prefork vacía todo registro encolado antes de salir; un proceso de pool solo depende de la misma garantía de vaciado al salir que ya tiene cualquier otra ruta.
+
+Una advertencia pertenece solo a esta receta: Celery redirige por defecto las propias llamadas a `print()` de una tarea hacia un registro de log. Un despliegue que desactive esa redirección por su cuenta (`worker_redirect_stdouts=False`, que semlog nunca establece) puede ver texto crudo y sin prefijo de `print()` intercalado con las líneas JSON de semlog.
 
 ## Configuración
 
@@ -436,7 +469,7 @@ Cada registro es un objeto JSON por línea, en UTF-8. Este registro se emitió d
   "service.instance.id": "936c21f2-7be1-4006-933a-e84d39621fe7",
   "deployment.environment.name": "production",
   "telemetry.sdk.name": "semlog",
-  "telemetry.sdk.version": "0.4.0",
+  "telemetry.sdk.version": "0.5.0",
   "telemetry.sdk.language": "python"
 }
 ```

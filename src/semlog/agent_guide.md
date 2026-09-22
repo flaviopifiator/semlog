@@ -8,7 +8,7 @@ The name is `semantic` plus `log`: semlog applies the field names of OpenTelemet
 
 ## Public API
 
-semlog exposes exactly ten public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods. The package ships a PEP 561 `py.typed` marker, so a type checker reads the annotations it carries instead of treating the package as untyped; the signatures below are the authoritative ones.
+semlog exposes exactly eleven public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods. The package ships a PEP 561 `py.typed` marker, so a type checker reads the annotations it carries instead of treating the package as untyped; the signatures below are the authoritative ones.
 
 ### configure
 
@@ -122,6 +122,14 @@ def llm() -> str: ...
 ```
 
 Returns this exact guide as a `str`, preceded by a header generated at read time (installed semlog version, pinned OTel Semantic Conventions version). Reads only package data via stdlib `importlib.resources`; performs no network access and raises no error on a correctly installed package. `python -m semlog llm` prints the identical text to stdout and exits with status code 0.
+
+### celery
+
+```python
+def celery(app, /) -> None: ...
+```
+
+Wires per-task span continuation and publish-side inject onto a Celery `Celery` app; call it once, in the same module that creates `app`. Idempotent across repeated calls, and safe to call before or without `configure()`. `import semlog` never requires Celery installed.
 
 ## Call-site rules
 
@@ -414,6 +422,25 @@ web.run_app(app, access_log=None)
 ```
 
 `event.duration` covers the handler's execution only. aiohttp sends the response after the middleware chain has returned, so response transmission, a deferred async body and a `FileResponse` send fall outside it; a `StreamResponse` the handler writes to and a WebSocket session it keeps open fall inside it, because the handler awaits them.
+## Celery recipe
+
+`semlog.celery(app)` wires per-task span continuation, publish-side inject, worker/beat/task-logging ownership and prefork shutdown flush onto a Celery app. Call it once, in the same module that creates `app`:
+
+```python
+# celery.py
+import semlog
+from celery import Celery
+
+app = Celery("myproject")
+app.conf.update(broker_url="redis://localhost:6379/0")
+semlog.celery(app)
+```
+
+For a Django project, `celery(app)` still belongs in the Celery app-creation module; `configure()` keeps its usual place in `AppConfig.ready()` (see the Django recipe above), never in `settings.py` or the Celery app-creation module.
+
+In `full` mode, worker, beat and `celery.task`-logger records (including `get_task_logger(__name__)` calls inside a task) are emitted as semlog JSON, exactly once each, governed by Celery's own `--loglevel`. In `hybrid` mode, Celery's own text output stays byte-identical to a run without `celery(app)` at `--loglevel=INFO` and above; the one documented exception is `DEBUG`, where Celery's own `TaskPool: Apply` record prints the outbound task headers verbatim, including the injected `traceparent` (and any trusted baggage) -- those values bypass semlog's own redaction at that specific line, since Celery renders it directly, never through semlog's pipeline. Each task execution runs inside its own span, continuing the publisher's `trace_id` when one injected a `traceparent`; publishing a child task from inside a running task propagates that task's own span onward. A prefork worker child flushes every queued record before it exits; a solo-pool process relies on the same flush-on-exit guarantee every other route already has.
+
+One caution belongs to this recipe alone: Celery redirects a task's own `print()` calls into a log record by default. A deployment that turns that redirect off on its own (`worker_redirect_stdouts=False`, never set by semlog itself) may see raw, un-prefixed `print()` text interleaved with semlog's JSON lines instead.
 
 ## When to use each API
 
@@ -426,6 +453,7 @@ web.run_app(app, access_log=None)
 | Adding a field to every later record in the same request or operation | `bind(attributes)` | At the start of handling, or as soon as the value is known |
 | Calling another service | `inject(headers, trusted=...)` | Immediately before the outbound call |
 | Work with no HTTP request (jobs, scheduled tasks, queue consumers, scripts) | `operation(headers=None)` | Wrapping the body of the work |
+| Running background jobs on Celery | `celery(app)` | Once, in the module that creates the Celery `app` |
 | Before the process exits, or in tests | `flush(timeout=None)` | Immediately before `os._exit()`, or at the end of a test |
 | Reading the complete agent-facing reference | `llm()` / `python -m semlog llm` | Once per agent session, or whenever this guide is needed offline |
 

@@ -1,5 +1,5 @@
 """Public-surface audit (task 3.17; design #170 §8; STANDARDS CP-015):
-`semlog.__all__` is exactly the 10 documented names, in the design's order,
+`semlog.__all__` is exactly the 11 documented names, in the design's order,
 and nothing else public leaks from the package `dict`.
 """
 
@@ -20,6 +20,7 @@ EXPECTED_NAMES = (
     "inject",
     "flush",
     "llm",
+    "celery",
 )
 
 
@@ -30,7 +31,7 @@ class PublicSurfaceTests(unittest.TestCase):
     landed with its own capability's GREEN step, so this audit is
     expected to pass on first run with no production change."""
 
-    def test_all_is_exactly_the_ten_documented_names_in_order(self):
+    def test_all_is_exactly_the_eleven_documented_names_in_order(self):
         self.assertEqual(EXPECTED_NAMES, semlog.__all__)
 
     def test_every_public_name_is_callable(self):
