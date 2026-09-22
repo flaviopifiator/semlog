@@ -109,21 +109,17 @@ class WheelContentTests(unittest.TestCase):
         self.assertEqual(1, len(license_entries))
         self.assertIn(".dist-info/licenses/", license_entries[0])
 
-    def test_requires_dist_contains_only_the_optional_aiohttp_extra(self):
+    def test_zero_requires_dist(self):
         """Checks the METADATA *header* only (up to the first blank line):
         the long description is the README's own prose, which legitimately
         mentions the string "Requires-Dist" while explaining the
-        dependency policy -- a naive whole-text substring check would be a
-        false positive against that sentence. The base installation has no
-        dependencies; aiohttp is permitted only behind its package extra."""
+        zero-dependency guarantee -- a naive whole-text substring check
+        would be a false positive against that sentence."""
         header = self.metadata_text.split("\n\n", 1)[0]
-        requires_dist = [
+        offenders = [
             line for line in header.splitlines() if line.startswith("Requires-Dist:")
         ]
-        self.assertEqual(
-            ["Requires-Dist: aiohttp>=3.10,<4 ; extra == 'aiohttp'"],
-            requires_dist,
-        )
+        self.assertEqual([], offenders)
 
 
 class InstalledWheelEndToEndTests(unittest.TestCase):
