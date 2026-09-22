@@ -86,7 +86,24 @@ logger.info("order.created", extra={"app.order.id": "ord_42", "app.order.total":
 Run `python app.py`. It prints one JSON line:
 
 ```json
-{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.3.0","telemetry.sdk.language":"python"}
+{
+  "timestamp": "2026-09-14T18:49:31.659966Z",
+  "severity_text": "INFO",
+  "severity_number": 9,
+  "event_name": "order.created",
+  "body": null,
+  "otel.scope.name": "__main__",
+  "app.order.id": "ord_42",
+  "app.order.total": 1500,
+  "service.name": "checkout",
+  "service.namespace": null,
+  "service.version": null,
+  "service.instance.id": "b821b60b-7f5e-44a9-88f8-7cf734286abe",
+  "deployment.environment.name": null,
+  "telemetry.sdk.name": "semlog",
+  "telemetry.sdk.version": "0.4.0",
+  "telemetry.sdk.language": "python"
+}
 ```
 
 Three rules keep records useful:
@@ -99,17 +116,17 @@ Three rules keep records useful:
 
 semlog exposes exactly nine names. Everything else stays standard `logging`.
 
-| Name | Use it to |
-|---|---|
-| `configure(...)` | Configure the process once, at startup |
-| `WSGIMiddleware(app)` | Wrap a WSGI application: trace context and `http.request.id` on every record of a request |
-| `ASGIMiddleware(app)` | The same, for an ASGI application |
-| `DjangoMiddleware` | A `settings.MIDDLEWARE` entry serving both sync and async Django views |
-| `operation(headers=None)` | Correlate work outside HTTP, such as jobs, queue consumers and CLI commands |
-| `bind(attributes)` | Add fields to every later record of the current request or operation |
-| `inject(headers, *, trusted=True)` | Propagate trace context to an outbound call |
-| `flush(timeout=None)` | Wait until every queued record is written, before `os._exit()` or in tests |
-| `llm()` | Return the agent guide bundled with the installed version (also `python -m semlog llm`) |
+| Name                               | Use it to                                                                                 |
+| ---------------------------------- | ----------------------------------------------------------------------------------------- |
+| `configure(...)`                   | Configure the process once, at startup                                                    |
+| `WSGIMiddleware(app)`              | Wrap a WSGI application: trace context and `http.request.id` on every record of a request |
+| `ASGIMiddleware(app)`              | The same, for an ASGI application                                                         |
+| `DjangoMiddleware`                 | A `settings.MIDDLEWARE` entry serving both sync and async Django views                    |
+| `operation(headers=None)`          | Correlate work outside HTTP, such as jobs, queue consumers and CLI commands               |
+| `bind(attributes)`                 | Add fields to every later record of the current request or operation                      |
+| `inject(headers, *, trusted=True)` | Propagate trace context to an outbound call                                               |
+| `flush(timeout=None)`              | Wait until every queued record is written, before `os._exit()` or in tests                |
+| `llm()`                            | Return the agent guide bundled with the installed version (also `python -m semlog llm`)   |
 
 Full signatures and semantics are in the [agent guide](src/semlog/agent_guide.md).
 
@@ -252,31 +269,31 @@ One project-side detail belongs to this route: it imports `semlog` before Django
 
 Every `configure()` parameter is keyword-only; there is no settings object or dictionary. An invalid value or combination raises `ValueError` immediately, at startup, never later at runtime.
 
-| Group | Parameter | Default | Notes |
-|---|---|---|---|
-| Identity | `service_name` | detected | parameter > `OTEL_SERVICE_NAME` > `OTEL_RESOURCE_ATTRIBUTES` > `pyproject.toml` |
-| Identity | `service_version` | detected | parameter > `OTEL_RESOURCE_ATTRIBUTES` > installed package version > `pyproject.toml` |
-| Identity | `service_namespace` | `None` | parameter > `OTEL_RESOURCE_ATTRIBUTES` |
-| Identity | `service_instance_id` | one UUIDv4 per process | parameter > `OTEL_RESOURCE_ATTRIBUTES` |
-| Identity | `environment` | `None` | parameter > `OTEL_RESOURCE_ATTRIBUTES` |
-| Identity | `identity` | `None` | one value per level named in `identity_levels` |
-| Identity | `identity_levels` | `("role", "component")` | level names composed into one `{namespace}.identity` field |
-| Output | `level` | `"INFO"` | effective root logger level |
-| Output | `namespace` | `"app"` | root of the custom attribute namespace |
-| Output | `capture_loggers` | `()` | third-party loggers whose own handlers are removed, with propagation turned on |
-| Output | `search_dir` | `None` (current working directory) | directory that `pyproject.toml` detection searches upward from |
-| Privacy | `redact_keys` | `()` | added to the built-in redaction list, which cannot be turned off |
-| Distributed context | `baggage_allow` | `()` | baggage keys copied into attributes; process-wide default for the middlewares and `operation()` |
-| Distributed context | `baggage_prefix` | `"baggage."` | attribute-key prefix for copied baggage members |
-| Distributed context | `accept_inbound_baggage` | `True` | `False` ignores an inbound `baggage` header entirely, for public trust boundaries |
-| Limits | `max_attributes` | 128 (or environment variable) | see STANDARDS.md section 6 |
-| Limits | `max_attribute_length` | no limit (or environment variable) | see STANDARDS.md section 6 |
-| Transport | `queue` | `True` | `False` writes synchronously, with no internal queue and no writer thread |
-| Transport | `queue_size` | `10000` | maximum number of queued lines |
-| Transport | `overflow` | `"block"` | `"block"` or `"drop"`, see [Queue overflow](#queue-overflow) |
-| Mode | `mode` | `None` (resolves to `"full"`) | `"full"`, `"hybrid"` or `"off"`; parameter > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"` |
-| Catalog | `catalog` | `None` | event catalog document (JSON) |
-| Catalog | `catalog_mode` | `"off"` without a catalog, `"warn"` with one | `"off"`, `"warn"` or `"strict"` |
+| Group               | Parameter                | Default                                      | Notes                                                                                                |
+| ------------------- | ------------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| Identity            | `service_name`           | detected                                     | parameter > `OTEL_SERVICE_NAME` > `OTEL_RESOURCE_ATTRIBUTES` > `pyproject.toml`                      |
+| Identity            | `service_version`        | detected                                     | parameter > `OTEL_RESOURCE_ATTRIBUTES` > installed package version > `pyproject.toml`                |
+| Identity            | `service_namespace`      | `None`                                       | parameter > `OTEL_RESOURCE_ATTRIBUTES`                                                               |
+| Identity            | `service_instance_id`    | one UUIDv4 per process                       | parameter > `OTEL_RESOURCE_ATTRIBUTES`                                                               |
+| Identity            | `environment`            | `None`                                       | parameter > `OTEL_RESOURCE_ATTRIBUTES`                                                               |
+| Identity            | `identity`               | `None`                                       | one value per level named in `identity_levels`                                                       |
+| Identity            | `identity_levels`        | `("role", "component")`                      | level names composed into one `{namespace}.identity` field                                           |
+| Output              | `level`                  | `"INFO"`                                     | effective root logger level                                                                          |
+| Output              | `namespace`              | `"app"`                                      | root of the custom attribute namespace                                                               |
+| Output              | `capture_loggers`        | `()`                                         | third-party loggers whose own handlers are removed, with propagation turned on                       |
+| Output              | `search_dir`             | `None` (current working directory)           | directory that `pyproject.toml` detection searches upward from                                       |
+| Privacy             | `redact_keys`            | `()`                                         | added to the built-in redaction list, which cannot be turned off                                     |
+| Distributed context | `baggage_allow`          | `()`                                         | baggage keys copied into attributes; process-wide default for the middlewares and `operation()`      |
+| Distributed context | `baggage_prefix`         | `"baggage."`                                 | attribute-key prefix for copied baggage members                                                      |
+| Distributed context | `accept_inbound_baggage` | `True`                                       | `False` ignores an inbound `baggage` header entirely, for public trust boundaries                    |
+| Limits              | `max_attributes`         | 128 (or environment variable)                | see STANDARDS.md section 6                                                                           |
+| Limits              | `max_attribute_length`   | no limit (or environment variable)           | see STANDARDS.md section 6                                                                           |
+| Transport           | `queue`                  | `True`                                       | `False` writes synchronously, with no internal queue and no writer thread                            |
+| Transport           | `queue_size`             | `10000`                                      | maximum number of queued lines                                                                       |
+| Transport           | `overflow`               | `"block"`                                    | `"block"` or `"drop"`, see [Queue overflow](#queue-overflow)                                         |
+| Mode                | `mode`                   | `None` (resolves to `"full"`)                | `"full"`, `"hybrid"` or `"off"`; parameter > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"` |
+| Catalog             | `catalog`                | `None`                                       | event catalog document (JSON)                                                                        |
+| Catalog             | `catalog_mode`           | `"off"` without a catalog, `"warn"` with one | `"off"`, `"warn"` or `"strict"`                                                                      |
 
 ### Precedence and environment variables
 
@@ -291,13 +308,13 @@ For the identity and limit parameters below, precedence, from highest to lowest,
 
 Recognized environment variables:
 
-| Variable | Sets |
-|---|---|
-| `OTEL_SERVICE_NAME` | `service.name` (`service_name`) |
-| `OTEL_RESOURCE_ATTRIBUTES` | `service.namespace` (`service_namespace`), `service.version` (`service_version`), `service.instance.id` (`service_instance_id`) and `deployment.environment.name` (`environment`); also the fallback for `service.name` (`service_name`) |
-| `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`, `OTEL_ATTRIBUTE_COUNT_LIMIT` | the `max_attributes` limit |
-| `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` | the `max_attribute_length` limit |
-| `SEMLOG_MODE` | `mode` (see [Modes](#modes)) |
+| Variable                                                                           | Sets                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `OTEL_SERVICE_NAME`                                                                | `service.name` (`service_name`)                                                                                                                                                                                                          |
+| `OTEL_RESOURCE_ATTRIBUTES`                                                         | `service.namespace` (`service_namespace`), `service.version` (`service_version`), `service.instance.id` (`service_instance_id`) and `deployment.environment.name` (`environment`); also the fallback for `service.name` (`service_name`) |
+| `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`, `OTEL_ATTRIBUTE_COUNT_LIMIT`               | the `max_attributes` limit                                                                                                                                                                                                               |
+| `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` | the `max_attribute_length` limit                                                                                                                                                                                                         |
+| `SEMLOG_MODE`                                                                      | `mode` (see [Modes](#modes))                                                                                                                                                                                                             |
 
 When both variables of a limit are set, the `OTEL_LOGRECORD_*` variable wins over the generic `OTEL_ATTRIBUTE_*` one.
 
@@ -310,11 +327,11 @@ When both variables of a limit are set, the `OTEL_LOGRECORD_*` variable wins ove
 
 Each record is rendered on the calling thread and queued for a single writer thread that writes it to `stdout`. When the queue is full, `overflow` decides what happens:
 
-| Mode | Behavior | Use it when |
-|---|---|---|
-| `overflow="block"` (default) | The call waits for room in the queue; no record is lost | No record may be lost and an occasional wait is acceptable |
-| `overflow="drop"` | The call never waits. At 90% capacity, records below `WARNING` are dropped; the last 10% is reserved for `WARNING`, `ERROR` and `CRITICAL`. Every drop is counted and reported | Application latency matters more than log completeness |
-| `queue=False` | Synchronous write, with no queue and no writer thread | Short scripts, debugging, environments without threads |
+| Mode                         | Behavior                                                                                                                                                                       | Use it when                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `overflow="block"` (default) | The call waits for room in the queue; no record is lost                                                                                                                        | No record may be lost and an occasional wait is acceptable |
+| `overflow="drop"`            | The call never waits. At 90% capacity, records below `WARNING` are dropped; the last 10% is reserved for `WARNING`, `ERROR` and `CRITICAL`. Every drop is counted and reported | Application latency matters more than log completeness     |
+| `queue=False`                | Synchronous write, with no queue and no writer thread                                                                                                                          | Short scripts, debugging, environments without threads     |
 
 ### SEMLOG_LOG_REQUESTS
 
@@ -400,7 +417,7 @@ Every record is one JSON object per line, in UTF-8. This record was logged insid
   "service.instance.id": "936c21f2-7be1-4006-933a-e84d39621fe7",
   "deployment.environment.name": "production",
   "telemetry.sdk.name": "semlog",
-  "telemetry.sdk.version": "0.3.0",
+  "telemetry.sdk.version": "0.4.0",
   "telemetry.sdk.language": "python"
 }
 ```
@@ -411,13 +428,13 @@ Keys are flat, dotted strings. Trace fields appear only when a trace context is 
 
 The test suite runs in CI on CPython 3.10, 3.11, 3.12, 3.13 and 3.14; 3.15 also runs there and is allowed to fail. The package is pure Python (`py3-none-any` wheel). It ships a PEP 561 `py.typed` marker, so a type checker reads the annotations the package carries instead of treating it as untyped. Framework integration is tested in CI against these versions:
 
-| Framework | Version | Python | Role |
-|---|---|---|---|
-| FastAPI (Starlette 0.17.1) | 0.71.0 | 3.10 | minimum |
-| FastAPI (Starlette 1.6.0) | 0.141.1 | 3.10, 3.14 | latest |
-| Django | 3.2.9 | 3.10 | minimum |
-| Django | 5.2 LTS | 3.10, 3.14 | latest |
-| Django | 6.1 | 3.12, 3.14 | latest |
+| Framework                  | Version | Python     | Role    |
+| -------------------------- | ------- | ---------- | ------- |
+| FastAPI (Starlette 0.17.1) | 0.71.0  | 3.10       | minimum |
+| FastAPI (Starlette 1.6.0)  | 0.141.1 | 3.10, 3.14 | latest  |
+| Django                     | 3.2.9   | 3.10       | minimum |
+| Django                     | 5.2 LTS | 3.10, 3.14 | latest  |
+| Django                     | 6.1     | 3.12, 3.14 | latest  |
 
 FastAPI is tested with `async def` and sync `def` endpoints. Django is tested with sync views over WSGI and with async and sync views over ASGI.
 

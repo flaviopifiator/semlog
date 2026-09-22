@@ -86,7 +86,24 @@ logger.info("order.created", extra={"app.order.id": "ord_42", "app.order.total":
 Ejecute `python app.py`. Imprime una línea JSON:
 
 ```json
-{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.3.0","telemetry.sdk.language":"python"}
+{
+  "timestamp": "2026-09-14T18:49:31.659966Z",
+  "severity_text": "INFO",
+  "severity_number": 9,
+  "event_name": "order.created",
+  "body": null,
+  "otel.scope.name": "__main__",
+  "app.order.id": "ord_42",
+  "app.order.total": 1500,
+  "service.name": "checkout",
+  "service.namespace": null,
+  "service.version": null,
+  "service.instance.id": "b821b60b-7f5e-44a9-88f8-7cf734286abe",
+  "deployment.environment.name": null,
+  "telemetry.sdk.name": "semlog",
+  "telemetry.sdk.version": "0.4.0",
+  "telemetry.sdk.language": "python"
+}
 ```
 
 Tres reglas mantienen útiles los registros:
@@ -99,17 +116,17 @@ Tres reglas mantienen útiles los registros:
 
 semlog expone exactamente nueve nombres. Todo lo demás sigue siendo `logging` estándar.
 
-| Nombre | Sirve para |
-|---|---|
-| `configure(...)` | Configurar el proceso una sola vez, al arrancar |
-| `WSGIMiddleware(app)` | Envolver una aplicación WSGI: contexto de traza y `http.request.id` en cada registro de una solicitud |
-| `ASGIMiddleware(app)` | Lo mismo, para una aplicación ASGI |
-| `DjangoMiddleware` | Una entrada de `settings.MIDDLEWARE` que sirve vistas Django tanto síncronas como asíncronas |
-| `operation(headers=None)` | Correlacionar trabajo fuera de HTTP, como jobs, consumidores de colas y comandos de CLI |
-| `bind(attributes)` | Agregar campos a todos los registros posteriores de la solicitud u operación vigente |
-| `inject(headers, *, trusted=True)` | Propagar el contexto de traza a una llamada saliente |
-| `flush(timeout=None)` | Esperar a que se escriban todos los registros encolados, antes de `os._exit()` o en pruebas |
-| `llm()` | Devolver la guía para agentes incluida en la versión instalada (también `python -m semlog llm`) |
+| Nombre                             | Sirve para                                                                                            |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `configure(...)`                   | Configurar el proceso una sola vez, al arrancar                                                       |
+| `WSGIMiddleware(app)`              | Envolver una aplicación WSGI: contexto de traza y `http.request.id` en cada registro de una solicitud |
+| `ASGIMiddleware(app)`              | Lo mismo, para una aplicación ASGI                                                                    |
+| `DjangoMiddleware`                 | Una entrada de `settings.MIDDLEWARE` que sirve vistas Django tanto síncronas como asíncronas          |
+| `operation(headers=None)`          | Correlacionar trabajo fuera de HTTP, como jobs, consumidores de colas y comandos de CLI               |
+| `bind(attributes)`                 | Agregar campos a todos los registros posteriores de la solicitud u operación vigente                  |
+| `inject(headers, *, trusted=True)` | Propagar el contexto de traza a una llamada saliente                                                  |
+| `flush(timeout=None)`              | Esperar a que se escriban todos los registros encolados, antes de `os._exit()` o en pruebas           |
+| `llm()`                            | Devolver la guía para agentes incluida en la versión instalada (también `python -m semlog llm`)       |
 
 Las firmas completas y su semántica están en la [guía para agentes](src/semlog/agent_guide.md).
 
@@ -250,33 +267,33 @@ Hay un detalle del proyecto que pertenece a esta ruta: importa `semlog` antes de
 
 ## Configuración
 
-Todos los parámetros de `configure()` son de solo palabra clave (*keyword-only*); no existe un objeto ni un diccionario de configuración. Un valor o una combinación inválidos lanzan `ValueError` de inmediato, al arrancar, nunca más tarde en tiempo de ejecución.
+Todos los parámetros de `configure()` son de solo palabra clave (_keyword-only_); no existe un objeto ni un diccionario de configuración. Un valor o una combinación inválidos lanzan `ValueError` de inmediato, al arrancar, nunca más tarde en tiempo de ejecución.
 
-| Grupo | Parámetro | Valor por defecto | Notas |
-|---|---|---|---|
-| Identidad | `service_name` | detectado | parámetro > `OTEL_SERVICE_NAME` > `OTEL_RESOURCE_ATTRIBUTES` > `pyproject.toml` |
-| Identidad | `service_version` | detectado | parámetro > `OTEL_RESOURCE_ATTRIBUTES` > versión del paquete instalado > `pyproject.toml` |
-| Identidad | `service_namespace` | `None` | parámetro > `OTEL_RESOURCE_ATTRIBUTES` |
-| Identidad | `service_instance_id` | un UUIDv4 por proceso | parámetro > `OTEL_RESOURCE_ATTRIBUTES` |
-| Identidad | `environment` | `None` | parámetro > `OTEL_RESOURCE_ATTRIBUTES` |
-| Identidad | `identity` | `None` | un valor por cada nivel nombrado en `identity_levels` |
-| Identidad | `identity_levels` | `("role", "component")` | nombres de los niveles que componen el campo `{namespace}.identity` |
-| Salida | `level` | `"INFO"` | nivel efectivo del logger raíz |
-| Salida | `namespace` | `"app"` | raíz del espacio de nombres de los atributos personalizados |
-| Salida | `capture_loggers` | `()` | loggers de terceros a los que se retiran sus propios manejadores y se activa la propagación |
-| Salida | `search_dir` | `None` (directorio de trabajo actual) | directorio desde el que la detección de `pyproject.toml` busca hacia arriba |
-| Privacidad | `redact_keys` | `()` | se suman a la lista de censura integrada, que no se puede desactivar |
-| Contexto distribuido | `baggage_allow` | `()` | claves de *baggage* copiadas como atributos; valor por defecto del proceso para los middlewares y `operation()` |
-| Contexto distribuido | `baggage_prefix` | `"baggage."` | prefijo de las claves de los atributos copiados desde *baggage* |
-| Contexto distribuido | `accept_inbound_baggage` | `True` | `False` ignora por completo un encabezado `baggage` entrante, para fronteras de confianza públicas |
-| Límites | `max_attributes` | 128 (o variable de entorno) | ver la sección 6 de STANDARDS.md |
-| Límites | `max_attribute_length` | sin límite (o variable de entorno) | ver la sección 6 de STANDARDS.md |
-| Transporte | `queue` | `True` | `False` escribe de forma síncrona, sin cola interna ni hilo escritor |
-| Transporte | `queue_size` | `10000` | cantidad máxima de líneas en la cola |
-| Transporte | `overflow` | `"block"` | `"block"` o `"drop"`, ver [Desborde de la cola](#desborde-de-la-cola) |
-| Modo | `mode` | `None` (se resuelve a `"full"`) | `"full"`, `"hybrid"` o `"off"`; parámetro > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"` |
-| Catálogo | `catalog` | `None` | documento del catálogo de eventos (JSON) |
-| Catálogo | `catalog_mode` | `"off"` sin catálogo, `"warn"` con catálogo | `"off"`, `"warn"` o `"strict"` |
+| Grupo                | Parámetro                | Valor por defecto                           | Notas                                                                                                           |
+| -------------------- | ------------------------ | ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Identidad            | `service_name`           | detectado                                   | parámetro > `OTEL_SERVICE_NAME` > `OTEL_RESOURCE_ATTRIBUTES` > `pyproject.toml`                                 |
+| Identidad            | `service_version`        | detectado                                   | parámetro > `OTEL_RESOURCE_ATTRIBUTES` > versión del paquete instalado > `pyproject.toml`                       |
+| Identidad            | `service_namespace`      | `None`                                      | parámetro > `OTEL_RESOURCE_ATTRIBUTES`                                                                          |
+| Identidad            | `service_instance_id`    | un UUIDv4 por proceso                       | parámetro > `OTEL_RESOURCE_ATTRIBUTES`                                                                          |
+| Identidad            | `environment`            | `None`                                      | parámetro > `OTEL_RESOURCE_ATTRIBUTES`                                                                          |
+| Identidad            | `identity`               | `None`                                      | un valor por cada nivel nombrado en `identity_levels`                                                           |
+| Identidad            | `identity_levels`        | `("role", "component")`                     | nombres de los niveles que componen el campo `{namespace}.identity`                                             |
+| Salida               | `level`                  | `"INFO"`                                    | nivel efectivo del logger raíz                                                                                  |
+| Salida               | `namespace`              | `"app"`                                     | raíz del espacio de nombres de los atributos personalizados                                                     |
+| Salida               | `capture_loggers`        | `()`                                        | loggers de terceros a los que se retiran sus propios manejadores y se activa la propagación                     |
+| Salida               | `search_dir`             | `None` (directorio de trabajo actual)       | directorio desde el que la detección de `pyproject.toml` busca hacia arriba                                     |
+| Privacidad           | `redact_keys`            | `()`                                        | se suman a la lista de censura integrada, que no se puede desactivar                                            |
+| Contexto distribuido | `baggage_allow`          | `()`                                        | claves de _baggage_ copiadas como atributos; valor por defecto del proceso para los middlewares y `operation()` |
+| Contexto distribuido | `baggage_prefix`         | `"baggage."`                                | prefijo de las claves de los atributos copiados desde _baggage_                                                 |
+| Contexto distribuido | `accept_inbound_baggage` | `True`                                      | `False` ignora por completo un encabezado `baggage` entrante, para fronteras de confianza públicas              |
+| Límites              | `max_attributes`         | 128 (o variable de entorno)                 | ver la sección 6 de STANDARDS.md                                                                                |
+| Límites              | `max_attribute_length`   | sin límite (o variable de entorno)          | ver la sección 6 de STANDARDS.md                                                                                |
+| Transporte           | `queue`                  | `True`                                      | `False` escribe de forma síncrona, sin cola interna ni hilo escritor                                            |
+| Transporte           | `queue_size`             | `10000`                                     | cantidad máxima de líneas en la cola                                                                            |
+| Transporte           | `overflow`               | `"block"`                                   | `"block"` o `"drop"`, ver [Desborde de la cola](#desborde-de-la-cola)                                           |
+| Modo                 | `mode`                   | `None` (se resuelve a `"full"`)             | `"full"`, `"hybrid"` o `"off"`; parámetro > `SEMLOG_MODE` > `[tool.semlog].mode` (3.11+) > `"full"`             |
+| Catálogo             | `catalog`                | `None`                                      | documento del catálogo de eventos (JSON)                                                                        |
+| Catálogo             | `catalog_mode`           | `"off"` sin catálogo, `"warn"` con catálogo | `"off"`, `"warn"` o `"strict"`                                                                                  |
 
 ### Precedencia y variables de entorno
 
@@ -291,13 +308,13 @@ Para los parámetros de identidad y de límites que siguen, el orden de preceden
 
 Variables de entorno reconocidas:
 
-| Variable | Define |
-|---|---|
-| `OTEL_SERVICE_NAME` | `service.name` (`service_name`) |
-| `OTEL_RESOURCE_ATTRIBUTES` | `service.namespace` (`service_namespace`), `service.version` (`service_version`), `service.instance.id` (`service_instance_id`) y `deployment.environment.name` (`environment`); también es el respaldo de `service.name` (`service_name`) |
-| `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`, `OTEL_ATTRIBUTE_COUNT_LIMIT` | el límite `max_attributes` |
-| `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` | el límite `max_attribute_length` |
-| `SEMLOG_MODE` | `mode` (ver [Modos](#modos)) |
+| Variable                                                                           | Define                                                                                                                                                                                                                                     |
+| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OTEL_SERVICE_NAME`                                                                | `service.name` (`service_name`)                                                                                                                                                                                                            |
+| `OTEL_RESOURCE_ATTRIBUTES`                                                         | `service.namespace` (`service_namespace`), `service.version` (`service_version`), `service.instance.id` (`service_instance_id`) y `deployment.environment.name` (`environment`); también es el respaldo de `service.name` (`service_name`) |
+| `OTEL_LOGRECORD_ATTRIBUTE_COUNT_LIMIT`, `OTEL_ATTRIBUTE_COUNT_LIMIT`               | el límite `max_attributes`                                                                                                                                                                                                                 |
+| `OTEL_LOGRECORD_ATTRIBUTE_VALUE_LENGTH_LIMIT`, `OTEL_ATTRIBUTE_VALUE_LENGTH_LIMIT` | el límite `max_attribute_length`                                                                                                                                                                                                           |
+| `SEMLOG_MODE`                                                                      | `mode` (ver [Modos](#modos))                                                                                                                                                                                                               |
 
 Cuando las dos variables de un límite están definidas, la variable `OTEL_LOGRECORD_*` gana sobre la genérica `OTEL_ATTRIBUTE_*`.
 
@@ -310,11 +327,11 @@ Detección desde `pyproject.toml`:
 
 Cada registro se renderiza en el hilo que hace la llamada y se encola para un único hilo escritor, que lo escribe en `stdout`. Cuando la cola se llena, `overflow` define qué ocurre:
 
-| Modo | Comportamiento | Cuándo usarlo |
-|---|---|---|
-| `overflow="block"` (por defecto) | La llamada espera hasta que haya espacio en la cola; no se pierde ningún registro | No se puede perder ningún registro y una espera ocasional es aceptable |
-| `overflow="drop"` | La llamada nunca espera. Al 90 % de ocupación se descartan los registros por debajo de `WARNING`; el 10 % restante se reserva para `WARNING`, `ERROR` y `CRITICAL`. Cada descarte se cuenta y se reporta | La latencia de la aplicación importa más que la completitud del registro |
-| `queue=False` | Escritura síncrona, sin cola ni hilo escritor | Scripts cortos, depuración, entornos sin hilos |
+| Modo                             | Comportamiento                                                                                                                                                                                           | Cuándo usarlo                                                            |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| `overflow="block"` (por defecto) | La llamada espera hasta que haya espacio en la cola; no se pierde ningún registro                                                                                                                        | No se puede perder ningún registro y una espera ocasional es aceptable   |
+| `overflow="drop"`                | La llamada nunca espera. Al 90 % de ocupación se descartan los registros por debajo de `WARNING`; el 10 % restante se reserva para `WARNING`, `ERROR` y `CRITICAL`. Cada descarte se cuenta y se reporta | La latencia de la aplicación importa más que la completitud del registro |
+| `queue=False`                    | Escritura síncrona, sin cola ni hilo escritor                                                                                                                                                            | Scripts cortos, depuración, entornos sin hilos                           |
 
 ### SEMLOG_LOG_REQUESTS
 
@@ -400,7 +417,7 @@ Cada registro es un objeto JSON por línea, en UTF-8. Este registro se emitió d
   "service.instance.id": "936c21f2-7be1-4006-933a-e84d39621fe7",
   "deployment.environment.name": "production",
   "telemetry.sdk.name": "semlog",
-  "telemetry.sdk.version": "0.3.0",
+  "telemetry.sdk.version": "0.4.0",
   "telemetry.sdk.language": "python"
 }
 ```
@@ -411,13 +428,13 @@ Las claves son cadenas planas con puntos. Los campos de traza aparecen solo cuan
 
 La suite de pruebas se ejecuta en integración continua sobre CPython 3.10, 3.11, 3.12, 3.13 y 3.14; la versión 3.15 también se ejecuta y se permite que falle. El paquete es Python puro (rueda `py3-none-any`). Incluye un marcador `py.typed` (PEP 561), de modo que un verificador de tipos lee las anotaciones que el paquete trae, en lugar de tratarlo como no tipado. La integración con frameworks se prueba en integración continua contra estas versiones:
 
-| Framework | Versión | Python | Rol |
-|---|---|---|---|
-| FastAPI (Starlette 0.17.1) | 0.71.0 | 3.10 | mínima |
-| FastAPI (Starlette 1.6.0) | 0.141.1 | 3.10, 3.14 | más reciente |
-| Django | 3.2.9 | 3.10 | mínima |
-| Django | 5.2 LTS | 3.10, 3.14 | más reciente |
-| Django | 6.1 | 3.12, 3.14 | más reciente |
+| Framework                  | Versión | Python     | Rol          |
+| -------------------------- | ------- | ---------- | ------------ |
+| FastAPI (Starlette 0.17.1) | 0.71.0  | 3.10       | mínima       |
+| FastAPI (Starlette 1.6.0)  | 0.141.1 | 3.10, 3.14 | más reciente |
+| Django                     | 3.2.9   | 3.10       | mínima       |
+| Django                     | 5.2 LTS | 3.10, 3.14 | más reciente |
+| Django                     | 6.1     | 3.12, 3.14 | más reciente |
 
 FastAPI se prueba con puntos finales `async def` y `def` síncronos. Django se prueba con vistas síncronas sobre WSGI y con vistas asíncronas y síncronas sobre ASGI.
 
