@@ -1165,6 +1165,14 @@ _DJANGO_COEXISTENCE_MARKERS = {
     "en": ("is unsupported",),
     "es": ("no está soportado",),
 }
+_CELERY_PLACEMENT_MARKERS = {
+    "en": ("AppConfig.ready()", "same module that creates"),
+    "es": ("AppConfig.ready()", "mismo módulo que crea"),
+}
+_CELERY_MODE_MARKERS = {
+    "en": ("emitted as semlog JSON", "byte-identical", "TaskPool: Apply"),
+    "es": ("como JSON de semlog", "idéntica byte a byte", "TaskPool: Apply"),
+}
 
 
 def framework_recipes_narrative_problems(text, language):
@@ -1229,6 +1237,20 @@ def framework_recipes_narrative_problems(text, language):
             problems.append(f"missing coexistence marker {marker!r}")
     if "SEMLOG_LOG_REQUESTS" not in django_text:
         problems.append("missing SEMLOG_LOG_REQUESTS reference")
+
+    try:
+        celery_text = section(recipes_text, 3, "Celery")
+    except ValueError:
+        problems.append("no Celery subsection")
+        return problems
+    if "semlog.celery(app)" not in celery_text:
+        problems.append("missing the semlog.celery(app) spelling")
+    for marker in _CELERY_PLACEMENT_MARKERS[language]:
+        if marker not in celery_text:
+            problems.append(f"missing Celery placement marker {marker!r}")
+    for marker in _CELERY_MODE_MARKERS[language]:
+        if marker not in celery_text:
+            problems.append(f"missing Celery mode marker {marker!r}")
 
     return problems
 
@@ -1342,6 +1364,46 @@ class ReadmeFrameworkRecipesPerturbationTests(unittest.TestCase):
             "missing Django route 'get_asgi_application()'",
             framework_recipes_narrative_problems(mutated, "en"),
         )
+
+    def test_deleting_the_celery_subsection_entirely_is_caught(self):
+        start = self.english.index("### Celery")
+        end = self.english.index("## Configuration")
+        mutated = self.english[:start] + self.english[end:]
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "no Celery subsection", framework_recipes_narrative_problems(mutated, "en")
+        )
+
+    def test_removing_the_celery_spelling_is_caught(self):
+        mutated = self.english.replace("semlog.celery(app)", "the Celery hook")
+        self.assertNotEqual(mutated, self.english)
+        self.assertIn(
+            "missing the semlog.celery(app) spelling",
+            framework_recipes_narrative_problems(mutated, "en"),
+        )
+
+    def test_removing_the_celery_appconfig_placement_is_caught(self):
+        for language, markers in _CELERY_PLACEMENT_MARKERS.items():
+            original = readme_text(language)
+            mutated = original.replace(markers[0], "the app config")
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    f"missing Celery placement marker {markers[0]!r}",
+                    framework_recipes_narrative_problems(mutated, language),
+                )
+
+    def test_removing_the_celery_hybrid_guarantee_is_caught(self):
+        for language, markers in _CELERY_MODE_MARKERS.items():
+            byte_identical_marker = markers[1]
+            original = readme_text(language)
+            mutated = original.replace(byte_identical_marker, "similar")
+            with self.subTest(language=language):
+                self.assertNotEqual(mutated, original)
+                self.assertIn(
+                    f"missing Celery mode marker {byte_identical_marker!r}",
+                    framework_recipes_narrative_problems(mutated, language),
+                )
 
     def test_removing_the_disable_existing_loggers_note_is_caught(self):
         for language in READMES:

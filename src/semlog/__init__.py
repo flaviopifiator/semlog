@@ -3,6 +3,7 @@ names); ``__all__`` never lists a name before it exists."""
 
 from __future__ import annotations
 
+from ._celery import celery
 from ._config import configure
 from ._context import bind, inject, operation
 from ._identity import _dist_version
@@ -48,4 +49,5 @@ __all__: tuple[str, ...] = (  # noqa: RUF022
     "inject",
     "flush",
     "llm",
+    "celery",
 )

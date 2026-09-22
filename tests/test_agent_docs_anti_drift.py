@@ -27,6 +27,7 @@ from semlog import (
     DjangoMiddleware,
     WSGIMiddleware,
     bind,
+    celery,
     configure,
     inject,
     operation,
@@ -51,6 +52,7 @@ _PUBLIC_OBJECTS = {
     "inject": inject,
     "flush": flush,
     "llm": semlog.llm,
+    "celery": celery,
 }
 
 REQUIRED_H2_ORDER = (
@@ -61,6 +63,7 @@ REQUIRED_H2_ORDER = (
     "Configuration and precedence",
     "FastAPI recipe",
     "Django recipe",
+    "Celery recipe",
     "When to use each API",
     "Migration checklist",
     "Review checklist",
@@ -242,6 +245,84 @@ class AgentGuidePublicApiTests(unittest.TestCase):
             if real != documented:
                 mismatches.append(f"{name}: guide={documented!r} real={real!r}")
         self.assertEqual([], mismatches)
+
+
+# Small enough range that a spelled-out count word never needs anything
+# fancier than a lookup table (validation-1 M1: the H3-set check above
+# reads the *headings*, never this prose sentence, so a stale count word
+# can survive indefinitely next to a correct, complete H3 list).
+_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+}
+_GUIDE_COUNT_RE = re.compile(r"semlog exposes exactly (\w+) public names")
+
+
+def _guide_declared_public_name_count(text):
+    """The integer `len(semlog.__all__)` the guide's own prose sentence
+    claims, or `None` when the sentence itself, or its count word, is not
+    found (both are failures the test below reports explicitly)."""
+    match = _GUIDE_COUNT_RE.search(text)
+    if match is None:
+        return None
+    return _NUMBER_WORDS.get(match.group(1))
+
+
+class AgentGuidePublicNameCountTests(unittest.TestCase):
+    """Proves: DOC-011, CP-015
+
+    The guide's prose count sentence ("semlog exposes exactly {word}
+    public names") must name the real `len(semlog.__all__)`. Distinct
+    from `AgentGuidePublicApiTests.test_h3_set_equals_all_with_no_
+    duplicates` above, which reads the H3 *headings* only and never this
+    sentence -- exactly how "nine" survived a tenth H3 (`### celery`)
+    landing right next to it (validation-1 M1)."""
+
+    def test_guide_count_word_matches_len_all(self):
+        text = _guide_text()
+        count = _guide_declared_public_name_count(text)
+        self.assertIsNotNone(
+            count, "no 'semlog exposes exactly <word> public names' sentence found"
+        )
+        self.assertEqual(len(semlog.__all__), count)
+
+
+class AgentGuidePublicNameCountPerturbationTests(unittest.TestCase):
+    """`test_guide_count_word_matches_len_all` is shown here to be capable
+    of failing, against a deliberately stale in-memory copy; the real file
+    is never written to."""
+
+    def test_a_stale_count_word_is_caught(self):
+        text = _guide_text()
+        real_count = _guide_declared_public_name_count(text)
+        self.assertEqual(
+            len(semlog.__all__), real_count, "fixture setup: guide is stale"
+        )
+        stale_word = next(
+            word for word, value in _NUMBER_WORDS.items() if value == real_count - 1
+        )
+        current_word = next(
+            word for word, value in _NUMBER_WORDS.items() if value == real_count
+        )
+        mutated = text.replace(
+            f"exactly {current_word} public names",
+            f"exactly {stale_word} public names",
+            1,
+        )
+        self.assertNotEqual(mutated, text, "fixture setup: no match")
+        self.assertNotEqual(
+            len(semlog.__all__), _guide_declared_public_name_count(mutated)
+        )
 
 
 REQUIRED_LLMS_TXT_TARGETS = (
@@ -537,16 +618,18 @@ def _guide_section_text(text, level, title):
 
 
 def guide_recipes_narrative_problems(text=None):
-    """Every way the guide's "## FastAPI recipe"/"## Django recipe"
-    sections fail to prove DOC-011's full recipe text -- the
-    `add_middleware` recipe and its exception-handler caveat, the
+    """Every way the guide's "## FastAPI recipe"/"## Django recipe"/"##
+    Celery recipe" sections fail to prove DOC-011's full recipe text --
+    the `add_middleware` recipe and its exception-handler caveat, the
     `settings.MIDDLEWARE` recipe and `AppConfig.ready()` placement, the
     Django WSGI/ASGI wrapper route with its own measured limit, the
     outermost-placement recommendation, `process_exception`'s behavior
     and its two permanent limitations, the unsupported-coexistence note,
-    and the `SEMLOG_LOG_REQUESTS` setting (empty when it proves
-    everything). Scoped to each section's own span, never a whole-file
-    check."""
+    the `SEMLOG_LOG_REQUESTS` setting, the Celery entry-point placement
+    and spelling, the restated Django `AppConfig.ready()` placement, and
+    the `full`/`hybrid` mode guarantees with the `DEBUG`/baggage
+    limitation (empty when it proves everything). Scoped to each
+    section's own span, never a whole-file check."""
     if text is None:
         text = _guide_text()
     problems = []
@@ -595,6 +678,23 @@ def guide_recipes_narrative_problems(text=None):
         problems.append("missing coexistence-unsupported wording")
     if "SEMLOG_LOG_REQUESTS" not in django_text:
         problems.append("missing SEMLOG_LOG_REQUESTS mention")
+
+    celery_text = _guide_section_text(text, 2, "Celery recipe")
+    if celery_text is None:
+        problems.append("no 'Celery recipe' section")
+        return problems
+    if "semlog.celery(app)" not in celery_text:
+        problems.append("missing the semlog.celery(app) spelling")
+    if "same module that creates" not in celery_text:
+        problems.append("missing the entry-point placement guidance")
+    if "AppConfig.ready()" not in celery_text:
+        problems.append("missing the restated AppConfig.ready() placement")
+    if "emitted as semlog JSON" not in celery_text:
+        problems.append("missing the full-mode logging guarantee")
+    if "byte-identical" not in celery_text:
+        problems.append("missing the hybrid-mode byte-identity guarantee")
+    if "TaskPool: Apply" not in celery_text:
+        problems.append("missing the DEBUG/baggage limitation")
 
     return problems
 
@@ -703,6 +803,47 @@ class AgentGuideFrameworkRecipesPerturbationTests(unittest.TestCase):
         self.assertNotEqual(mutated, self.text)
         self.assertIn(
             "missing wrapper route 'get_wsgi_application()'",
+            guide_recipes_narrative_problems(mutated),
+        )
+
+    def test_deleting_the_celery_recipe_section_entirely_is_caught(self):
+        start = self.text.index("## Celery recipe")
+        end = self.text.index("## When to use each API")
+        mutated = self.text[:start] + self.text[end:]
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "no 'Celery recipe' section", guide_recipes_narrative_problems(mutated)
+        )
+
+    def test_removing_the_celery_spelling_is_caught(self):
+        mutated = self.text.replace("semlog.celery(app)", "the Celery integration", 3)
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing the semlog.celery(app) spelling",
+            guide_recipes_narrative_problems(mutated),
+        )
+
+    def test_removing_the_celery_entry_point_placement_is_caught(self):
+        mutated = self.text.replace("same module that creates", "some module")
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing the entry-point placement guidance",
+            guide_recipes_narrative_problems(mutated),
+        )
+
+    def test_removing_the_celery_full_mode_guarantee_is_caught(self):
+        mutated = self.text.replace("emitted as semlog JSON", "logged", 1)
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing the full-mode logging guarantee",
+            guide_recipes_narrative_problems(mutated),
+        )
+
+    def test_removing_the_celery_debug_baggage_limitation_is_caught(self):
+        mutated = self.text.replace("TaskPool: Apply", "its own logging", 1)
+        self.assertNotEqual(mutated, self.text)
+        self.assertIn(
+            "missing the DEBUG/baggage limitation",
             guide_recipes_narrative_problems(mutated),
         )
 
@@ -1090,8 +1231,8 @@ class PerturbationProofTests(unittest.TestCase):
 
     def test_a6_catches_a_reintroduced_numeric_budget(self):
         mutated = self.agents_md_text.replace(
-            "The public surface is exactly 10 names.",
-            "The public surface is exactly 10 names. At most 1,500 lines.",
+            "The public surface is exactly 11 names.",
+            "The public surface is exactly 11 names. At most 1,500 lines.",
             1,
         )
         self.assertNotEqual(mutated, self.agents_md_text, "fixture setup: no match")

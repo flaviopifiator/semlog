@@ -609,6 +609,7 @@ class ManualReleaseDispatchTests(_WorkflowTextMixin, unittest.TestCase):
             [
                 "aiohttp-matrix",
                 "build-wheel",
+                "celery-matrix",
                 "django-matrix",
                 "fastapi-matrix",
                 "lint",
@@ -849,6 +850,91 @@ class UnittestOnlyInCiTests(_WorkflowTextMixin, unittest.TestCase):
         for name, text in self.workflows.items():
             with self.subTest(workflow=name):
                 self.assertNotRegex(text, r"\bpytest\b")
+
+
+class CeleryMatrixJobTests(_WorkflowTextMixin, unittest.TestCase):
+    """Proves: CP-020
+
+    Slice 1's own check: the `celery-matrix` job exists, covers the floor
+    row (Celery 5.2.7, Python 3.10) and a latest row (Celery 5.6.3) across
+    the supported Python range, names no external broker service, and
+    never mentions kombu (addendum A1: the floor row resolves kombu
+    unpinned; naming or pinning it here would misstate that finding).
+    Slice 2 (`tests/test_celery_matrix.py`) proves the matrix actually
+    runs green; this module only proves the job's own shape."""
+
+    def setUp(self):
+        self.jobs = job_blocks(self.ci_text)
+
+    def test_celery_matrix_job_is_present(self):
+        self.assertIn("celery-matrix", self.jobs)
+
+    def test_floor_and_latest_rows_are_covered(self):
+        job = self.jobs["celery-matrix"]
+        matches = re.findall(r'- python: "([^"]+)"\s*\n\s*celery: "([^"]+)"', job)
+        self.assertIn(("3.10", "5.2.7"), matches, "no floor row (3.10, 5.2.7)")
+        latest = [pair for pair in matches if pair[1] == "5.6.3"]
+        self.assertGreaterEqual(len(latest), 1, "no latest-row (5.6.3) entry")
+        self.assertIn(("3.10", "5.6.3"), latest)
+
+    def test_latest_rows_reach_the_top_supported_pythons(self):
+        # validation-1 m4: the latest (5.6.3) rows must reach the top of
+        # the design's declared Python range (3.10-3.14), not stop at the
+        # floor's own 3.10.
+        job = self.jobs["celery-matrix"]
+        matches = re.findall(r'- python: "([^"]+)"\s*\n\s*celery: "([^"]+)"', job)
+        latest_pythons = {python for python, version in matches if version == "5.6.3"}
+        for expected in ("3.10", "3.13", "3.14"):
+            with self.subTest(python=expected):
+                self.assertIn(expected, latest_pythons)
+
+    def test_no_external_broker_service_is_declared(self):
+        job = self.jobs["celery-matrix"]
+        self.assertNotIn("services:", job)
+
+    def test_integration_module_configures_an_in_memory_broker(self):
+        # validation-1 m4: CP-020's own "in-memory broker" clause, proven
+        # at the module the job actually runs (not only the job-shape
+        # checks above).
+        text = (REPO_ROOT / "tests" / "test_celery_integration.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"broker_url": "memory://"', text)
+        self.assertIn('"result_backend": "cache+memory://"', text)
+
+    def test_kombu_is_never_named_anywhere_in_ci(self):
+        # Addendum A1: no kombu pin, no kombu approval -- the floor row
+        # resolves an unpinned kombu on its own.
+        self.assertNotIn("kombu", self.ci_text.lower())
+
+    def test_celery_matrix_job_runs_the_integration_test_module(self):
+        job = self.jobs["celery-matrix"]
+        self.assertIn("tests.test_celery_integration", job)
+
+    def test_celery_version_is_passed_through_env_not_interpolated(self):
+        job = self.jobs["celery-matrix"]
+        self.assertIn("CELERY_VERSION: ${{ matrix.celery }}", job)
+        self.assertIn('--with "celery==$CELERY_VERSION"', job)
+
+    def test_celery_matrix_job_also_runs_the_subprocess_matrix_module(self):
+        # Phase 2 (task 2.8): the real `celery` CLI subprocess matrix
+        # first appears here, alongside the phase 1 in-process module.
+        job = self.jobs["celery-matrix"]
+        self.assertIn("tests.test_celery_matrix", job)
+
+    def test_django_is_declared_per_row(self):
+        # Phase 2 (task 2.8): each row now also names a Django version,
+        # for the Django-layout subprocess fixture (`tests/_celery_
+        # django/`).
+        job = self.jobs["celery-matrix"]
+        matches = re.findall(r'- python: "([^"]+)"\s*\n\s*celery: "([^"]+)"', job)
+        django_matches = re.findall(r'django: "([^"]+)"', job)
+        self.assertEqual(len(matches), len(django_matches))
+
+    def test_django_version_is_passed_through_env_not_interpolated(self):
+        job = self.jobs["celery-matrix"]
+        self.assertIn("DJANGO_VERSION: ${{ matrix.django }}", job)
+        self.assertIn('--with "django==$DJANGO_VERSION"', job)
 
 
 class ScorecardAndBadgeNotAutomatedTests(unittest.TestCase):
