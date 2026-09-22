@@ -58,6 +58,9 @@ dependencies = []
 # not require one; security reports go through SECURITY.md instead.
 authors = [{ name = "flaviopifiator" }]
 
+[project.optional-dependencies]
+aiohttp = ["aiohttp>=3.10,<4"]
+
 [project.urls]
 Homepage = "https://github.com/flaviopifiator/semlog"
 Repository = "https://github.com/flaviopifiator/semlog"
