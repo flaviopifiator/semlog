@@ -203,7 +203,7 @@ class Doc007ComplianceReferencesTests(unittest.TestCase):
 # Every element DOC-008 requires AGENTS.md's tooling policy to declare.
 AGENTS_TOOLING_POLICY_ELEMENTS = (
     "standard library",
-    "FastAPI, Starlette, Django, loguru, structlog",
+    "FastAPI, Starlette, Django, aiohttp, loguru, structlog",
     "`ruff`",
     "GitHub Actions",
     "`uv_build`",
@@ -246,7 +246,7 @@ class Doc008ToolingPolicyTests(unittest.TestCase):
         span = _span(_standards_text(), "DOC-008")
         required_substrings = (
             "standard library",
-            "FastAPI, Starlette, Django, loguru, structlog",
+            "FastAPI, Starlette, Django, aiohttp, loguru, structlog",
             "ruff",
             "GitHub Actions",
             "uv_build",
@@ -668,13 +668,7 @@ def _readme_configure_table_params(text, title):
     start = text.index(f"## {title}\n")
     end = text.index("\n### ", start)
     table = text[start:end]
-    return set(
-        re.findall(
-            r"^\|[ \t]*[^|]+[ \t]*\|[ \t]*`([a-z_]+)`[ \t]*\|",
-            table,
-            re.MULTILINE,
-        )
-    )
+    return set(re.findall(r"^\| [^|]+ \| `([a-z_]+)` \|", table, re.MULTILINE))
 
 
 class ReadmeConfigureSignatureAntiDriftTests(unittest.TestCase):
@@ -755,11 +749,7 @@ class PerturbationProofTests(unittest.TestCase):
         real = set(inspect.signature(semlog.configure).parameters)
         for language, labels in READMES.items():
             original = readme_text(language)
-            mutated = re.sub(
-                r"(?m)^\|[ \t]*[^|]+[ \t]*\|[ \t]*`queue_size`[ \t]*\|.*\n",
-                "",
-                original,
-            )
+            mutated = re.sub(r"(?m)^\| [^|]+ \| `queue_size` \|.*\n", "", original)
             with self.subTest(language=language):
                 self.assertNotEqual(mutated, original)
                 documented = _readme_configure_table_params(

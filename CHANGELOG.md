@@ -11,14 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `AiohttpMiddleware`, installed through the optional `semlog[aiohttp]`
-  extra, for native aiohttp request context propagation and optional
-  `http.server.request` completion events.
+- `AiohttpMiddleware`, an `aiohttp.web` middleware entry that binds the
+  inbound trace context for the handler call and pops it on every exit
+  path, and that emits the optional `http.server.request` completion
+  event with `log_requests=True` (HTM-014 to HTM-017). A raised
+  `web.HTTPException` is reported at its own status as INFO; every other
+  exception, connection errors included, is an ERROR event with the
+  traceback, and only `asyncio.CancelledError` is silent.
+- An `aiohttp-matrix` continuous integration job covering aiohttp 3.10.0
+  on Python 3.10 and aiohttp 3.14.3 on Python 3.10 and 3.14.
 
 ### Changed
 
-- The public API grows from nine names to ten with `AiohttpMiddleware`;
-  the base installation remains free of mandatory runtime dependencies.
+- The public API grows from nine names to ten with `AiohttpMiddleware`
+  (CP-015). aiohttp is a test-only compatibility-matrix subject: it is
+  installed by its CI job, never declared in `pyproject.toml`, so the
+  wheel still declares zero `Requires-Dist` entries and `import semlog`
+  still imports no framework.
 
 ## [0.3.0] - 2026-09-16
 
