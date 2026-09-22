@@ -1,7 +1,12 @@
 """WSGI (PEP 3333) and pure ASGI 3.0 middlewares (design #162 §2.4/§2.5;
-HTM-001..007, CP-010, CP-011). Each request/scope gets its own fresh
+HTM-001..007, CP-010, CP-011), plus the Django (HTM-008..013) and aiohttp
+(HTM-014..017) framework entries. Each request/scope gets its own fresh
 `contextvars.Context`; the caller's real thread/task context is never
-mutated directly, so nothing can leak across requests (HTM-003/006)."""
+mutated directly, so nothing can leak across requests (HTM-003/006).
+No framework is imported at `semlog` import time: `django`, `asgiref`,
+`aiohttp` and even `asyncio` are imported lazily, inside the method that
+needs them (CP-008; `tests/test_packaging_hygiene.py::
+SemlogImportsWithoutDjangoTests` checks `sys.modules` for exactly that)."""
 
 from __future__ import annotations
 
@@ -412,3 +417,86 @@ class DjangoMiddleware:
         on_complete()
         pop(token)
         return response
+
+
+class AiohttpMiddleware:
+    """An `aiohttp.web.Application(middlewares=[...])` entry binding
+    request-scoped trace context around the handler call (HTM-014).
+    `__middleware_version__ = 1` is aiohttp's new-style marker: without
+    it aiohttp warns and calls the object as a middleware factory
+    instead. aiohttp is never imported here at `semlog` import time."""
+
+    __middleware_version__ = 1
+
+    def __init__(self, *, baggage_allow=None, log_requests=False):
+        self._baggage_allow = baggage_allow
+        self._log_requests = log_requests
+
+    async def __call__(self, request, handler):
+        if _modes.is_off():
+            # LM-005: as if semlog were not installed -- no scope pushed,
+            # so inject()/bind() called from inside the handler are inert.
+            return await handler(request)
+        snapshot = snapshot_from_headers(
+            request.headers.get, baggage_allow=self._baggage_allow
+        )
+        token = push(snapshot)
+        start = time.perf_counter_ns() if self._log_requests else None
+        try:
+            try:
+                response = await handler(request)
+            except BaseException as exc:
+                # Lazy, for the same reason `DjangoMiddleware.__init__`
+                # defers its own: `import semlog` must not pull `asyncio`
+                # into `sys.modules`. By the time a handler has raised,
+                # the running event loop has long since imported it.
+                import asyncio
+
+                if isinstance(exc, asyncio.CancelledError):
+                    # The only event-free exit (HTM-015). The task was
+                    # cancelled, so no response was ever produced and
+                    # there is no completion to report. A connection
+                    # error is NOT one of these: aiohttp still answers
+                    # 500 for it, so it keeps its ERROR event.
+                    raise
+                if self._log_requests:
+                    self._emit_failure(request, exc, start)
+                raise
+            # Read the status OUTSIDE the handler's own `try` (HTM-015): a
+            # handler that forgot its `return` must reach aiohttp's own
+            # "Missing return statement on request handler" diagnostic,
+            # never be reported as this request's own failure by an
+            # `AttributeError` raised inside semlog.
+            if self._log_requests:
+                _emit_request_event(
+                    request.method,
+                    request.path,
+                    getattr(response, "status", None),
+                    time.perf_counter_ns() - start,
+                )
+            return response
+        finally:
+            pop(token)
+
+    @staticmethod
+    def _emit_failure(request, exc, start):
+        """HTM-015's INFO/ERROR selection for an exception leaving the
+        handler: only an `aiohttp.web.HTTPException` is a response in
+        disguise, so only it reports its own status at INFO. Everything
+        else is a failure aiohttp answers 500 for, and gets the ERROR
+        event with its traceback -- including an outbound
+        `ClientResponseError`, whose own `.status` belongs to the call
+        the handler made, not to this request."""
+        from aiohttp import web  # lazy: never at `semlog` import time
+
+        duration = time.perf_counter_ns() - start
+        if isinstance(exc, web.HTTPException):
+            _emit_request_event(request.method, request.path, exc.status, duration)
+            return
+        _emit_request_event(
+            request.method,
+            request.path,
+            None,
+            duration,
+            (type(exc), exc, exc.__traceback__),
+        )
