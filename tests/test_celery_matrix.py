@@ -34,6 +34,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 try:
     import celery as _celery_pkg
@@ -103,6 +104,30 @@ def _non_json_lines(text):
     return lines
 
 
+def _subprocess_env(env_extra=None):
+    """Build the environment for a `celery` CLI subprocess.
+
+    Celery's entry point is a click group built with
+    `auto_envvar_prefix="CELERY"` (`celery/bin/celery.py`), so any
+    `CELERY_<OPTION>` variable already in the environment fills that
+    option: the `CELERY_VERSION` pin the celery-matrix CI job exports to
+    install its row arrives as `--version 5.2.7`, and the CLI exits
+    before a worker ever starts. Dropping every `CELERY_` variable keeps
+    a fixture run dependent only on what a test passes explicitly; a
+    `None` value in `env_extra` removes that variable.
+    """
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("CELERY_")
+    }
+    env.pop("SEMLOG_MODE", None)
+    for key, value in (env_extra or {}).items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    return env
+
+
 def _run_fixture(
     module, *, worker_args=(), env_extra=None, done_timeout=15, term_timeout=15
 ):
@@ -112,14 +137,8 @@ def _run_fixture(
     """
     tmp_dir = tempfile.mkdtemp(prefix="semlog-celery-matrix-")
     done_file = os.path.join(tmp_dir, "done")
-    env = dict(os.environ)
-    env.pop("SEMLOG_MODE", None)
+    env = _subprocess_env(env_extra)
     env["SEMLOG_CELERY_DONE_FILE"] = done_file
-    if env_extra:
-        env.update({k: v for k, v in env_extra.items() if v is not None})
-        for key, value in env_extra.items():
-            if value is None:
-                env.pop(key, None)
     # A fixed hostname removes kombu's own "No hostname was supplied"
     # warning, whose relative ordering against the "ready." line is
     # otherwise racy between two separate subprocess runs (observed on
@@ -160,6 +179,34 @@ def _run_fixture(
         proc.kill()
         stdout, stderr = proc.communicate(timeout=5)
     return proc.returncode, stdout, stderr, done_seen, tmp_dir
+
+
+class SubprocessEnvTests(unittest.TestCase):
+    """The environment every fixture subprocess inherits.
+
+    Regression: the celery-matrix job exports `CELERY_VERSION` to pin the
+    row it installs, and Celery's click group reads `CELERY_`-prefixed
+    variables as options, so the pin reached the CLI as `--version
+    5.2.7` and every subprocess fixture failed in CI while passing
+    locally, where that variable is unset."""
+
+    def test_celery_prefixed_variables_never_reach_the_cli(self):
+        with mock.patch.dict(
+            os.environ, {"CELERY_VERSION": "5.2.7", "SEMLOG_MODE": "hybrid"}
+        ):
+            env = _subprocess_env()
+
+        self.assertNotIn("CELERY_VERSION", env)
+        self.assertNotIn("SEMLOG_MODE", env)
+
+    def test_explicit_extras_are_applied_and_none_removes(self):
+        with mock.patch.dict(os.environ, {"SEMLOG_CELERY_BURST": "1"}):
+            env = _subprocess_env(
+                {"SEMLOG_MODE": "hybrid", "SEMLOG_CELERY_BURST": None}
+            )
+
+        self.assertEqual("hybrid", env["SEMLOG_MODE"])
+        self.assertNotIn("SEMLOG_CELERY_BURST", env)
 
 
 @unittest.skipIf(_celery_pkg is None, "celery is not installed in this environment")
@@ -242,10 +289,7 @@ class FullModeBeatTests(unittest.TestCase):
     worker."""
 
     def _run_beat(self, module, *, env_extra=None, wait=3, term_timeout=10):
-        env = dict(os.environ)
-        env.pop("SEMLOG_MODE", None)
-        if env_extra:
-            env.update(env_extra)
+        env = _subprocess_env(env_extra)
         tmp_dir = tempfile.mkdtemp(prefix="semlog-celery-matrix-beat-")
         schedule_path = os.path.join(tmp_dir, "celerybeat-schedule")
         argv = [
