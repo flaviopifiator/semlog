@@ -46,9 +46,7 @@ class PublicSurfaceTests(unittest.TestCase):
         # `__all__` itself and any imported submodule alias are not part of
         # the documented public surface; only names semlog.__all__ lists
         # (or a strict subset thereof) may remain after that exclusion.
-        self.assertTrue(
-            module_public.issubset(set(EXPECTED_NAMES) | {"annotations", "extras"})
-        )
+        self.assertTrue(module_public.issubset(set(EXPECTED_NAMES) | {"annotations"}))
 
 
 if __name__ == "__main__":

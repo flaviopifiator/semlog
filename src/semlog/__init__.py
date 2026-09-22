@@ -6,9 +6,13 @@ from __future__ import annotations
 from ._config import configure
 from ._context import bind, inject, operation
 from ._identity import _dist_version
-from ._middleware import ASGIMiddleware, DjangoMiddleware, WSGIMiddleware
+from ._middleware import (
+    AiohttpMiddleware,
+    ASGIMiddleware,
+    DjangoMiddleware,
+    WSGIMiddleware,
+)
 from ._transport import flush
-from .extras import AiohttpMiddleware
 
 # The only code copy of the semconv version pinned in STANDARDS.md §4 (design
 # #170 §17.3); `llm()`'s generated header cites it alongside the installed

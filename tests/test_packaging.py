@@ -64,19 +64,12 @@ class ZeroRuntimeDependenciesTests(unittest.TestCase):
         self.assertEqual("[]", re.sub(r"\s+", "", match.group(1)))
 
     def test_dev_tooling_lives_outside_project_dependencies(self):
-        """Dev-only tooling belongs in `[dependency-groups]`; aiohttp alone
-        is allowed as an optional runtime integration dependency."""
+        """Dev-only tooling (ruff) must be declared in `[dependency-groups]`,
+        a table pyproject metadata never surfaces as `Requires-Dist`, never
+        in `[project.optional-dependencies]` (which WOULD ship as extras)."""
         text = _pyproject_text()
         self.assertIn("[dependency-groups]", text)
-        data = _load_pyproject()
-        if data is not None:
-            self.assertEqual(
-                ["aiohttp>=3.10,<4"],
-                data["project"]["optional-dependencies"]["aiohttp"],
-            )
-            return
-        self.assertIn("[project.optional-dependencies]", text)
-        self.assertIn('aiohttp = ["aiohttp>=3.10,<4"]', text)
+        self.assertNotIn("[project.optional-dependencies]", text)
 
 
 class BuildBackendDeclaredTests(unittest.TestCase):

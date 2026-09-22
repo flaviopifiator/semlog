@@ -1090,8 +1090,8 @@ class PerturbationProofTests(unittest.TestCase):
 
     def test_a6_catches_a_reintroduced_numeric_budget(self):
         mutated = self.agents_md_text.replace(
-            "The public surface is exactly 9 names.",
-            "The public surface is exactly 9 names. At most 1,500 lines.",
+            "The public surface is exactly 10 names.",
+            "The public surface is exactly 10 names. At most 1,500 lines.",
             1,
         )
         self.assertNotEqual(mutated, self.agents_md_text, "fixture setup: no match")

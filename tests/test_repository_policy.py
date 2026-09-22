@@ -606,7 +606,14 @@ class ManualReleaseDispatchTests(_WorkflowTextMixin, unittest.TestCase):
         )
         refs = checkout_inputs(self.ci_text, "ref")
         self.assertEqual(
-            ["build-wheel", "django-matrix", "fastapi-matrix", "lint", "test"],
+            [
+                "aiohttp-matrix",
+                "build-wheel",
+                "django-matrix",
+                "fastapi-matrix",
+                "lint",
+                "test",
+            ],
             sorted(refs),
         )
         for job, values in sorted(refs.items()):
@@ -769,6 +776,66 @@ class PythonVersionMatrixTests(_WorkflowTextMixin, unittest.TestCase):
 
     def test_3_15_is_allowed_to_fail(self):
         self.assertIn("continue-on-error: ${{ matrix.python == '3.15' }}", self.ci_text)
+
+
+# Each compatibility-matrix job and the one test module it runs.
+MATRIX_JOB_TEST_MODULES = {
+    "aiohttp-matrix": "tests.test_aiohttp_middleware",
+    "django-matrix": "tests.test_django_matrix",
+    "fastapi-matrix": "tests.test_fastapi_matrix",
+}
+
+_MATRIX_ROW_RE = re.compile(r'(?m)^ {10}- python: "([^"]+)"\n {12}aiohttp: "([^"]+)"$')
+
+
+class CompatibilityMatrixJobsTests(_WorkflowTextMixin, unittest.TestCase):
+    """Every compatibility-matrix job in `ci.yml` keeps the same shape: a
+    least-privilege `contents: read`, a `fail-fast: false` include list
+    holding a floor row and the latest rows, the pinned version reaching
+    the command through `env:` rather than a `${{ }}` expression inside
+    `run:`, and exactly one `uv run --with` invocation naming only that
+    framework's own test module (the default `test` job never installs a
+    framework, so the module skips there).
+
+    Supporting checks, no `Proves` tag: CP-001, CP-002 and CP-009 are
+    proven by their own modules; this one keeps the three jobs from
+    drifting apart as one is added."""
+
+    def setUp(self):
+        self.jobs = job_blocks(self.ci_text)
+
+    def test_every_matrix_job_runs_only_its_own_test_module(self):
+        for job, module in sorted(MATRIX_JOB_TEST_MODULES.items()):
+            with self.subTest(job=job):
+                self.assertIn(job, self.jobs)
+                block = self.jobs[job]
+                self.assertIn(f"python -m unittest {module} -v", block)
+                self.assertNotIn("unittest discover", block)
+
+    def test_every_matrix_job_is_least_privilege_and_does_not_fail_fast(self):
+        for job in sorted(MATRIX_JOB_TEST_MODULES):
+            with self.subTest(job=job):
+                block = self.jobs[job]
+                self.assertIn("runs-on: ubuntu-24.04", block)
+                self.assertRegex(block, r"(?m)^    permissions:\n      contents: read$")
+                self.assertRegex(block, r"(?m)^      fail-fast: false$")
+                self.assertIn("python-version: ${{ matrix.python }}", block)
+                self.assertIn("uv sync --locked", block)
+
+    def test_the_aiohttp_job_pins_a_floor_row_and_the_latest_rows(self):
+        rows = _MATRIX_ROW_RE.findall(self.jobs["aiohttp-matrix"])
+        self.assertEqual(
+            [("3.10", "3.10.0"), ("3.10", "3.14.3"), ("3.14", "3.14.3")], rows
+        )
+
+    def test_the_aiohttp_version_reaches_the_command_through_env(self):
+        block = self.jobs["aiohttp-matrix"]
+        self.assertIn("AIOHTTP_VERSION: ${{ matrix.aiohttp }}", block)
+        self.assertIn('uv run --with "aiohttp==$AIOHTTP_VERSION"', block)
+        for line in block.splitlines():
+            if re.match(r"^\s*(- )?run:", line):
+                with self.subTest(line=line.strip()):
+                    self.assertNotIn("${{", line)
 
 
 class UnittestOnlyInCiTests(_WorkflowTextMixin, unittest.TestCase):

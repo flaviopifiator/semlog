@@ -33,11 +33,7 @@ def configure_table_params(text, title):
     """Backtick-quoted parameter names in the `Parameter` column of the
     table under the `## {title}` heading (before its first subsection)."""
     table = section(text, 2, title).split("\n### ", 1)[0]
-    return set(
-        re.findall(
-            r"^\|[ \t]*[^|]+[ \t]*\|[ \t]*`([a-z_]+)`[ \t]*\|", table, re.MULTILINE
-        )
-    )
+    return set(re.findall(r"^\| [^|]+ \| `([a-z_]+)` \|", table, re.MULTILINE))
 
 
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s]+)\)")
@@ -150,20 +146,15 @@ class ReadmeParityPerturbationTests(unittest.TestCase):
         self.assertNotEqual(fenced_blocks(self.english), fenced_blocks(mutated))
 
     def test_a_removed_configuration_row_is_caught(self):
-        mutated = re.sub(
-            r"(?m)^\|[ \t]*Transporte[ \t]*\|[ \t]*`queue_size`[ \t]*\|.*\n",
-            "",
-            self.spanish,
-        )
+        mutated = re.sub(r"(?m)^\| Transporte \| `queue_size` \|.*\n", "", self.spanish)
         self.assertNotEqual(mutated, self.spanish)
         self.assertNotIn("queue_size", configure_table_params(mutated, "Configuración"))
 
     def test_an_invented_configuration_row_is_caught(self):
-        mutated = re.sub(
-            r"(?m)^(\|[ \t]*Output[ \t]*\|[ \t]*`level`[ \t]*\|.*)$",
-            "| Output | `not_a_real_param` | x | x |\n\\1",
-            self.english,
-            count=1,
+        mutated = self.english.replace(
+            "| Output | `level` |",
+            "| Output | `not_a_real_param` | x | x |\n| Output | `level` |",
+            1,
         )
         self.assertNotEqual(mutated, self.english)
         params = configure_table_params(mutated, "Configuration")
@@ -275,7 +266,7 @@ _SEARCH_DIRECTION_PHRASES = {
 }
 _PRECEDENCE_DEFAULT_RE = re.compile(r'4\.[^\n]*`"full"`')
 _ADOPTION_ORDER_RE = re.compile(r"`hybrid`.{0,30}?`full`", re.DOTALL)
-_ENV_VAR_ROW_RE = re.compile(r"(?m)^\|[ \t]*`SEMLOG_MODE`[ \t]*\|.*$")
+_ENV_VAR_ROW = "| `SEMLOG_MODE` |"
 
 
 def opening_problems(text, language):
@@ -539,7 +530,7 @@ def env_var_table_problems(text, language):
         precedence_text = section(configuration_text, 3, labels["precedence"])
     except ValueError:
         return ["no Precedence and environment variables subsection"]
-    if _ENV_VAR_ROW_RE.search(precedence_text) is None:
+    if _ENV_VAR_ROW not in precedence_text:
         return ["missing SEMLOG_MODE row in the environment-variable table"]
     return []
 
@@ -1078,15 +1069,11 @@ class ReadmeModesPerturbationTests(unittest.TestCase):
         )
 
     def test_semlog_mode_env_var_row_deleted_in_both_editions_is_caught(self):
-        mutated_en = _ENV_VAR_ROW_RE.sub(
-            "",
-            self.english,
-            count=1,
+        mutated_en = self.english.replace(
+            "| `SEMLOG_MODE` | `mode` (see [Modes](#modes)) |\n", "", 1
         )
-        mutated_es = _ENV_VAR_ROW_RE.sub(
-            "",
-            self.spanish,
-            count=1,
+        mutated_es = self.spanish.replace(
+            "| `SEMLOG_MODE` | `mode` (ver [Modos](#modos)) |\n", "", 1
         )
         self.assertNotEqual(mutated_en, self.english)
         self.assertNotEqual(mutated_es, self.spanish)

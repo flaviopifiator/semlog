@@ -301,11 +301,10 @@ class ReadmeBadgePerturbationTests(unittest.TestCase):
 
     def test_a_stale_example_record_version_is_caught(self):
         version = pyproject_version()
-        mutated = re.sub(
-            rf'("telemetry\.sdk\.version"\s*:\s*)"{re.escape(version)}"',
-            r'\g<1>"0.0.1"',
-            self.text,
-            count=1,
+        mutated = self.text.replace(
+            f'"telemetry.sdk.version":"{version}"',
+            '"telemetry.sdk.version":"0.0.1"',
+            1,
         )
         self.assertNotEqual(mutated, self.text)
         self.assertIn("0.0.1", example_record_sdk_versions(mutated))
