@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-22
+
+### Added
+
+- `AiohttpMiddleware`, installed through the optional `semlog[aiohttp]`
+  extra, for native aiohttp request context propagation and optional
+  `http.server.request` completion events.
+
+### Changed
+
+- The public API grows from nine names to ten with `AiohttpMiddleware`;
+  the base installation remains free of mandatory runtime dependencies.
+
 ## [0.3.0] - 2026-09-16
 
 ### Added
