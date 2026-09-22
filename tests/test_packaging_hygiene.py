@@ -151,7 +151,8 @@ class Changelog030Tests(unittest.TestCase):
     CHANGELOG.md's `## [0.3.0]` section: a dated heading, a non-empty
     `### Added` subsection naming `DjangoMiddleware` and the FastAPI
     `add_middleware` recipe, and a non-empty `### Changed` subsection for
-    the CP-015/CP-017 amendments; `pyproject.toml` reads `0.3.0`."""
+    the CP-015/CP-017 amendments; `pyproject.toml` reads the current
+    `0.4.0` release version."""
 
     @classmethod
     def setUpClass(cls):
@@ -173,9 +174,9 @@ class Changelog030Tests(unittest.TestCase):
         self.assertIsNotNone(changed, "no ### Changed subsection")
         self.assertTrue(changed)
 
-    def test_pyproject_reads_0_3_0(self):
+    def test_pyproject_reads_0_4_0(self):
         version, _license = _load_pyproject_project_table()
-        self.assertEqual("0.3.0", version)
+        self.assertEqual("0.4.0", version)
 
     def test_0_3_0_heading_precedes_the_0_2_0_heading(self):
         # MINOR-C (round 2): DOC-013's own "The prior ## [0.2.0] section

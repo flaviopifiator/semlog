@@ -8,7 +8,7 @@ The name is `semantic` plus `log`: semlog applies the field names of OpenTelemet
 
 ## Public API
 
-semlog exposes exactly nine public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods. The package ships a PEP 561 `py.typed` marker, so a type checker reads the annotations it carries instead of treating the package as untyped; the signatures below are the authoritative ones.
+semlog exposes exactly ten public names. Nothing else is part of the public surface; everything else in application code stays plain stdlib `logging.getLogger(__name__)` and standard `Logger` methods. The package ships a PEP 561 `py.typed` marker, so a type checker reads the annotations it carries instead of treating the package as untyped; the signatures below are the authoritative ones.
 
 ### configure
 
@@ -72,13 +72,22 @@ class DjangoMiddleware:
 
 A `settings.MIDDLEWARE` entry serving both synchronous and asynchronous Django deployments through exactly one class: parses inbound `traceparent`/`tracestate`/baggage headers, binds a fresh context for the request, and stays correctly bound throughout a `StreamingHttpResponse` body, including on Django's oldest supported release. `baggage_allow` follows the same configured-default fallback as `WSGIMiddleware`/`ASGIMiddleware`. `log_requests=True` additionally emits one `http.server.request` completion event per request; left as `None` (the default), it resolves instead from the Django setting `SEMLOG_LOG_REQUESTS` (default off), because a dotted `MIDDLEWARE` entry cannot receive a keyword argument. `process_exception` stashes an unhandled view exception without swallowing it, so the completion event still carries the real final status and a rendered traceback; see the Django recipe below for placement guidance and this hook's permanent limitations.
 
+### AiohttpMiddleware
+
+```python
+class AiohttpMiddleware:
+    def __init__(self, *, baggage_allow=None, log_requests=False): ...
+```
+
+An `aiohttp.web` middleware instance, registered first in `web.Application(middlewares=[...])`, the outermost position. There is no package extra to install and no aiohttp import at `semlog` import time. It parses inbound `traceparent`/`tracestate`/baggage headers, keeps the scope bound while the handler runs, and pops it on every exit path, so a later request on the same keep-alive connection never inherits it. `baggage_allow` follows the same configured-default fallback as the other middlewares. `log_requests=True` emits one `http.server.request` event when the handler completes; run aiohttp with `access_log=None` so the same request is not also reported as a plain-text access line. A `web.HTTPException` the handler raises is the response aiohttp sends, so its event is INFO at that status with no traceback; every other exception gets the ERROR event with the traceback, `ConnectionResetError` included, because aiohttp answers 500. Only `asyncio.CancelledError` produces no event. `StreamResponse` writes and WebSocket activity awaited by the handler stay in scope; a deferred async response body and `FileResponse` transmission happen after the handler returns and are outside both the scope and `event.duration`. Use `asyncio.to_thread()` or `contextvars.copy_context()` for executor work that needs this context.
+
 ### operation
 
 ```python
 def operation(headers=None, *, baggage_allow=None): ...
 ```
 
-The correlation primitive for non-HTTP work (background jobs, queue consumers, CLI commands); the three middlewares use the same primitive internally. Used as a context manager: `with operation():`. Called with `headers`, it parses them like an inbound HTTP request; `baggage_allow` lists which inbound baggage keys are copied into log attributes, falling back to `configure(baggage_allow=...)`'s default when left as `None`. Called without `headers` while already inside an operation, it starts a child span on the same trace. Called without `headers` outside any operation, it starts a brand new trace.
+The correlation primitive for non-HTTP work (background jobs, queue consumers, CLI commands); the four middlewares use the same primitive internally. Used as a context manager: `with operation():`. Called with `headers`, it parses them like an inbound HTTP request; `baggage_allow` lists which inbound baggage keys are copied into log attributes, falling back to `configure(baggage_allow=...)`'s default when left as `None`. Called without `headers` while already inside an operation, it starts a child span on the same trace. Called without `headers` outside any operation, it starts a brand new trace.
 
 ### bind
 
@@ -376,6 +385,35 @@ application = semlog.WSGIMiddleware(get_wsgi_application(), log_requests=True)
 The ASGI form is the same with `get_asgi_application()` and `semlog.ASGIMiddleware`. This route gives up exception detail: Django converts a view exception into a 500 response before the wrapper sees it, so the wrapper cannot attach the traceback, and its completion event is an INFO record carrying `http.response.status_code` 500 with no `exception.*` field, where route 1 emits an ERROR record naming the exception. It also imports `semlog` before Django reads its settings, so a project `LOGGING` dictionary must keep `"disable_existing_loggers": False` or the completion event's own logger is disabled with every other pre-existing one.
 
 Using the class together with `WSGIMiddleware` or `ASGIMiddleware` wrapping the same application is unsupported: each layer parses the inbound `traceparent` independently and mints its own `span_id`, so with the completion event enabled on both, telemetry is duplicated.
+
+## aiohttp recipe
+
+Register one `AiohttpMiddleware` instance first in `middlewares=[...]`, and pass `access_log=None` whenever `log_requests=True`, so aiohttp's own access logger does not report the same request a second time as plain text.
+
+```python
+import logging
+
+import semlog
+from aiohttp import web
+
+semlog.configure(service_name="my-aiohttp-service")
+
+logger = logging.getLogger(__name__)
+
+
+async def get_order(request):
+    order_id = request.match_info["order_id"]
+    logger.info("order.lookup.started", extra={"app.order.id": order_id})
+    return web.json_response({"id": order_id})
+
+
+app = web.Application(middlewares=[semlog.AiohttpMiddleware(log_requests=True)])
+app.router.add_get("/orders/{order_id}", get_order)
+
+web.run_app(app, access_log=None)
+```
+
+`event.duration` covers the handler's execution only. aiohttp sends the response after the middleware chain has returned, so response transmission, a deferred async body and a `FileResponse` send fall outside it; a `StreamResponse` the handler writes to and a WebSocket session it keeps open fall inside it, because the handler awaits them.
 
 ## When to use each API
 

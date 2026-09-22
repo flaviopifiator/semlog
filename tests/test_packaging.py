@@ -248,8 +248,8 @@ class PackagingLayerSurfaceFactsTests(unittest.TestCase):
     tag needed here. CP-017 no longer publishes a class count to
     re-affirm."""
 
-    def test_public_surface_is_exactly_nine_names(self):
-        self.assertEqual(9, len(semlog.__all__))
+    def test_public_surface_is_exactly_ten_names(self):
+        self.assertEqual(10, len(semlog.__all__))
 
     def test_requires_python_floor_matches_cp_001(self):
         data = _load_pyproject()

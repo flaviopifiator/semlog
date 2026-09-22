@@ -17,7 +17,7 @@
 [![Django 3.2.9+](https://img.shields.io/badge/Django-%E2%89%A5%203.2.9-092E20?logo=django&logoColor=white)](.github/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 [![Runtime dependencies: 0](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)](pyproject.toml)
-[![Requirements proven: 110/110](https://img.shields.io/badge/requirements%20proven-110%2F110-brightgreen)](STANDARDS.md)
+[![Requirements proven: 114/114](https://img.shields.io/badge/requirements%20proven-114%2F114-brightgreen)](STANDARDS.md)
 [![PyPI](https://img.shields.io/pypi/v/semlog)](https://pypi.org/project/semlog/)
 
 ## What semlog is
@@ -43,9 +43,9 @@ semlog takes a few positions about what a log record is, and about what a loggin
 
 - **A log record is a contract, not free text.** The field names, their order and the `null` rules are specified in [STANDARDS.md](STANDARDS.md) and published as a JSON Schema ([`schemas/log-record.schema.json`](schemas/log-record.schema.json)). Removing or renaming a field is a major version change, and so is adopting a later Semantic Conventions rename.
 - **The standard library is enough.** semlog is built from `logging`, `json`, `contextvars` and `queue`, and the built wheel declares no `Requires-Dist` entries, so adopting it adds nothing to a dependency review.
-- **Application code should not have to learn a second logging API.** Call sites stay on `logging.getLogger(__name__)` and the standard `Logger` methods, and the public surface is nine names. semlog decides what a record looks like instead of asking every call site to be rewritten against a logger object of its own.
+- **Application code should not have to learn a second logging API.** Call sites stay on `logging.getLogger(__name__)` and the standard `Logger` methods, and the public surface is ten names. semlog decides what a record looks like instead of asking every call site to be rewritten against a logger object of its own.
 - **Adoption should be reversible.** A library that can only be adopted by rewriting every existing log line does not get adopted in a service that is already running, so `hybrid` mode rewrites none of them, and `SEMLOG_MODE=off` takes semlog back out from the environment, with no code change. See [Modes](#modes).
-- **A rule no test cites is not a rule.** Every normative requirement in [STANDARDS.md](STANDARDS.md) carries an identifier and at least one test that cites it by that identifier. The suite fails when a requirement has no proving test, and when a test cites an identifier that does not exist. STANDARDS.md declares 110 requirements today.
+- **A rule no test cites is not a rule.** Every normative requirement in [STANDARDS.md](STANDARDS.md) carries an identifier and at least one test that cites it by that identifier. The suite fails when a requirement has no proving test, and when a test cites an identifier that does not exist. STANDARDS.md declares 114 requirements today.
 - **A field name should mean the same thing to a person, to a tool and to an agent.** The names are not invented here: `severity_text`, `severity_number`, `trace_id`, `span_id`, `service.*` and `telemetry.sdk.*` follow the OpenTelemetry Logs Data Model and its Semantic Conventions, pinned to v1.44.0, and trace propagation follows W3C Trace Context. The agent-facing guide ships inside the package, so a coding agent applies the same rules offline (`python -m semlog llm`).
 
 ## Installation
@@ -86,7 +86,7 @@ logger.info("order.created", extra={"app.order.id": "ord_42", "app.order.total":
 Run `python app.py`. It prints one JSON line:
 
 ```json
-{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.3.0","telemetry.sdk.language":"python"}
+{"timestamp":"2026-09-14T18:49:31.659966Z","severity_text":"INFO","severity_number":9,"event_name":"order.created","body":null,"otel.scope.name":"__main__","app.order.id":"ord_42","app.order.total":1500,"service.name":"checkout","service.namespace":null,"service.version":null,"service.instance.id":"b821b60b-7f5e-44a9-88f8-7cf734286abe","deployment.environment.name":null,"telemetry.sdk.name":"semlog","telemetry.sdk.version":"0.4.0","telemetry.sdk.language":"python"}
 ```
 
 Three rules keep records useful:
@@ -97,7 +97,7 @@ Three rules keep records useful:
 
 ### Public API
 
-semlog exposes exactly nine names. Everything else stays standard `logging`.
+semlog exposes exactly ten names. Everything else stays standard `logging`.
 
 | Name | Use it to |
 |---|---|
@@ -105,6 +105,7 @@ semlog exposes exactly nine names. Everything else stays standard `logging`.
 | `WSGIMiddleware(app)` | Wrap a WSGI application: trace context and `http.request.id` on every record of a request |
 | `ASGIMiddleware(app)` | The same, for an ASGI application |
 | `DjangoMiddleware` | A `settings.MIDDLEWARE` entry serving both sync and async Django views |
+| `AiohttpMiddleware()` | An `aiohttp.web` middleware entry, registered on the application |
 | `operation(headers=None)` | Correlate work outside HTTP, such as jobs, queue consumers and CLI commands |
 | `bind(attributes)` | Add fields to every later record of the current request or operation |
 | `inject(headers, *, trusted=True)` | Propagate trace context to an outbound call |
@@ -117,7 +118,7 @@ Full signatures and semantics are in the [agent guide](src/semlog/agent_guide.md
 
 Each framework has more than one supported way in, and the routes are not equivalent. Every example below runs as written; a `# settings.py` or `# apps.py` marker names the file the block belongs in.
 
-Every route can add the same completion event: one `http.server.request` record per request, INFO on success, ERROR when the application raises an unhandled exception, carrying `http.request.method`, `url.path`, `http.response.status_code` and `event.duration` in nanoseconds, and never `url.query`. A wrapper enables it with `log_requests=True`, the Django middleware class with the `SEMLOG_LOG_REQUESTS` setting; both default to off. In `hybrid` mode the event needs one more line in the application; see [Modes](#modes).
+Every route can add the same completion event: one `http.server.request` record per request, INFO on success, ERROR when the application raises an unhandled exception, carrying `http.request.method`, `url.path`, `http.response.status_code` and `event.duration` in nanoseconds, and never `url.query`. A wrapper and the aiohttp middleware enable it with `log_requests=True`, the Django middleware class with the `SEMLOG_LOG_REQUESTS` setting; all default to off. In `hybrid` mode the event needs one more line in the application; see [Modes](#modes).
 
 ### FastAPI
 
@@ -247,6 +248,41 @@ application = semlog.ASGIMiddleware(get_asgi_application(), log_requests=True)
 One project-side detail belongs to this route: it imports `semlog` before Django reads its settings, so a project whose `LOGGING` dictionary omits `"disable_existing_loggers": False` disables every logger that already existed, semlog's completion-event logger among them, and the event stops appearing with no error. Keep that key in the dictionary.
 
 **Do not combine the two routes.** Using the class together with `WSGIMiddleware` or `ASGIMiddleware` wrapping the same application is unsupported: each layer parses the inbound `traceparent` independently and mints its own `span_id`, so with the completion event enabled on both, telemetry is duplicated. Use exactly one.
+
+### aiohttp
+
+`AiohttpMiddleware` is an `aiohttp.web` middleware, registered on the application itself. semlog never imports aiohttp: there is no package extra to install, and the wheel still declares zero dependencies.
+
+```python
+import logging
+
+import semlog
+from aiohttp import web
+
+semlog.configure(service_name="my-aiohttp-service")
+
+logger = logging.getLogger(__name__)
+
+
+async def get_order(request):
+    order_id = request.match_info["order_id"]
+    logger.info("order.lookup.started", extra={"app.order.id": order_id})
+    return web.json_response({"id": order_id})
+
+
+app = web.Application(middlewares=[semlog.AiohttpMiddleware(log_requests=True)])
+app.router.add_get("/orders/{order_id}", get_order)
+
+web.run_app(app, access_log=None)
+```
+
+Register it first in `middlewares=[...]`, the outermost position, so every other middleware's own logging runs inside the request context. Its completion event is enabled with `log_requests=True`, like the WSGI and ASGI wrappers; unlike Django, no setting is read.
+
+`access_log=None` belongs with `log_requests=True`. aiohttp's own access logger writes one plain-text line per request, so leaving it enabled reports every request twice: once as a JSON record and once as text.
+
+A handler that raises `web.HTTPNotFound`, or any other `web.HTTPException`, is answered by aiohttp with that status, so its completion event is an INFO record carrying it, with no traceback. Every other exception is a real failure that aiohttp answers 500 for, including a `ClientResponseError` raised by an outbound call the handler made: that one gets an ERROR record with the traceback, never the outbound call's own status. Only `asyncio.CancelledError` produces no event at all.
+
+`event.duration` covers the handler's execution, not the response transmission: aiohttp sends the response after the middleware chain has returned. A `StreamResponse` the handler writes to, and a WebSocket session it keeps open, are inside that interval, because the handler awaits them; a deferred asynchronous body and a `FileResponse` send happen after it, and code running there sees no bound context. Read the context inside the handler, or carry it with `contextvars.copy_context()` into work handed to an executor.
 
 ## Configuration
 
@@ -400,7 +436,7 @@ Every record is one JSON object per line, in UTF-8. This record was logged insid
   "service.instance.id": "936c21f2-7be1-4006-933a-e84d39621fe7",
   "deployment.environment.name": "production",
   "telemetry.sdk.name": "semlog",
-  "telemetry.sdk.version": "0.3.0",
+  "telemetry.sdk.version": "0.4.0",
   "telemetry.sdk.language": "python"
 }
 ```
@@ -418,8 +454,10 @@ The test suite runs in CI on CPython 3.10, 3.11, 3.12, 3.13 and 3.14; 3.15 also 
 | Django | 3.2.9 | 3.10 | minimum |
 | Django | 5.2 LTS | 3.10, 3.14 | latest |
 | Django | 6.1 | 3.12, 3.14 | latest |
+| aiohttp | 3.10.0 | 3.10 | minimum |
+| aiohttp | 3.14.3 | 3.10, 3.14 | latest |
 
-FastAPI is tested with `async def` and sync `def` endpoints. Django is tested with sync views over WSGI and with async and sync views over ASGI.
+FastAPI is tested with `async def` and sync `def` endpoints. Django is tested with sync views over WSGI and with async and sync views over ASGI. aiohttp is tested against a real application on a loopback socket, covering streaming, WebSocket and error responses.
 
 ## Documentation
 

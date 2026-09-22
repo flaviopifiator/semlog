@@ -1,4 +1,4 @@
-"""SEMLOG: a stdlib-only structured logging library (CP-015, 9 public
+"""SEMLOG: a stdlib-only structured logging library (CP-015, 10 public
 names); ``__all__`` never lists a name before it exists."""
 
 from __future__ import annotations
@@ -6,7 +6,12 @@ from __future__ import annotations
 from ._config import configure
 from ._context import bind, inject, operation
 from ._identity import _dist_version
-from ._middleware import ASGIMiddleware, DjangoMiddleware, WSGIMiddleware
+from ._middleware import (
+    AiohttpMiddleware,
+    ASGIMiddleware,
+    DjangoMiddleware,
+    WSGIMiddleware,
+)
 from ._transport import flush
 
 # The only code copy of the semconv version pinned in STANDARDS.md §4 (design
@@ -37,6 +42,7 @@ __all__: tuple[str, ...] = (  # noqa: RUF022
     "WSGIMiddleware",
     "ASGIMiddleware",
     "DjangoMiddleware",
+    "AiohttpMiddleware",
     "operation",
     "bind",
     "inject",
