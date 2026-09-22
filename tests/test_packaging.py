@@ -64,12 +64,19 @@ class ZeroRuntimeDependenciesTests(unittest.TestCase):
         self.assertEqual("[]", re.sub(r"\s+", "", match.group(1)))
 
     def test_dev_tooling_lives_outside_project_dependencies(self):
-        """Dev-only tooling (ruff) must be declared in `[dependency-groups]`,
-        a table pyproject metadata never surfaces as `Requires-Dist`, never
-        in `[project.optional-dependencies]` (which WOULD ship as extras)."""
+        """Dev-only tooling belongs in `[dependency-groups]`; aiohttp alone
+        is allowed as an optional runtime integration dependency."""
         text = _pyproject_text()
         self.assertIn("[dependency-groups]", text)
-        self.assertNotIn("[project.optional-dependencies]", text)
+        data = _load_pyproject()
+        if data is not None:
+            self.assertEqual(
+                ["aiohttp>=3.10,<4"],
+                data["project"]["optional-dependencies"]["aiohttp"],
+            )
+            return
+        self.assertIn("[project.optional-dependencies]", text)
+        self.assertIn('aiohttp = ["aiohttp>=3.10,<4"]', text)
 
 
 class BuildBackendDeclaredTests(unittest.TestCase):
@@ -248,8 +255,8 @@ class PackagingLayerSurfaceFactsTests(unittest.TestCase):
     tag needed here. CP-017 no longer publishes a class count to
     re-affirm."""
 
-    def test_public_surface_is_exactly_nine_names(self):
-        self.assertEqual(9, len(semlog.__all__))
+    def test_public_surface_is_exactly_ten_names(self):
+        self.assertEqual(10, len(semlog.__all__))
 
     def test_requires_python_floor_matches_cp_001(self):
         data = _load_pyproject()

@@ -22,6 +22,7 @@ from pathlib import Path
 
 import semlog
 from semlog import (
+    AiohttpMiddleware,
     ASGIMiddleware,
     DjangoMiddleware,
     WSGIMiddleware,
@@ -44,6 +45,7 @@ _PUBLIC_OBJECTS = {
     "WSGIMiddleware": WSGIMiddleware,
     "ASGIMiddleware": ASGIMiddleware,
     "DjangoMiddleware": DjangoMiddleware,
+    "AiohttpMiddleware": AiohttpMiddleware,
     "operation": operation,
     "bind": bind,
     "inject": inject,
